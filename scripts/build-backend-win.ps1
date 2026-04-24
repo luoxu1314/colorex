@@ -28,10 +28,6 @@ if (Test-Path "dist-python") {
   --hidden-import matplotlib.backends.backend_agg `
   --hidden-import PIL._tkinter_finder `
   --exclude-module tkinter `
-  --exclude-module test `
-  --exclude-module unittest `
-  --exclude-module pydoc `
-  --exclude-module doctest `
   --exclude-module IPython `
   --exclude-module notebook `
   python\process.py
