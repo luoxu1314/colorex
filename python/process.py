@@ -30,6 +30,31 @@ def dispatch(action: str | None, payload: dict) -> dict:
     if action == "ping":
         return ok({"success": True, "message": "pong"})
 
+    if action == "warmup":
+        # Eagerly pull in the expensive modules so the *first real* preview /
+        # mosaic request doesn't eat the cold-import cost while the user is
+        # staring at a spinner. Each stage is optional and independently
+        # tolerable: skip cleanly on failure so warmup never blocks startup.
+        stages = (payload or {}).get("stages") or ["preview"]
+        loaded: list[str] = []
+        errors: dict[str, str] = {}
+
+        def _stage(name: str, fn):
+            try:
+                fn()
+                loaded.append(name)
+            except Exception as exc:  # noqa: BLE001
+                errors[name] = str(exc)
+
+        if "preview" in stages:
+            _stage("numpy", lambda: __import__("numpy"))
+            _stage("pillow", lambda: __import__("PIL.Image"))
+        if "mosaic" in stages:
+            _stage("cv2", lambda: __import__("cv2"))
+            _stage("matplotlib", lambda: __import__("matplotlib.pyplot"))
+
+        return ok({"success": True, "loaded": loaded, "errors": errors, "message": "warmed"})
+
     settings = parse_settings(payload.get("settings") or {})
 
     if action == "generate_preview":
@@ -85,32 +110,103 @@ def run_one_shot(request_path: Path) -> int:
     return 0 if result.get("success") else 1
 
 
+def _diag(msg: str) -> None:
+    """Write a diagnostic line to stderr. The Electron side forwards every
+    stderr line into ``main.log`` as ``[python.stderr]`` so these heartbeats
+    make it dead-easy to see whether Python received a request at all.
+    """
+    try:
+        sys.stderr.write(f"[daemon] {msg}\n")
+        sys.stderr.flush()
+    except Exception:  # noqa: BLE001
+        # stderr might be None under weird PyInstaller configurations; the
+        # rest of the daemon still works without diagnostics.
+        pass
+
+
+def _read_line_raw(max_bytes: int = 16 * 1024 * 1024) -> bytes | None:
+    """Read a single \\n-terminated line from fd 0 using ``os.read`` directly.
+
+    Bypasses Python's text-mode stdin buffering, which has been observed to
+    hang on Windows when the parent is Node/Electron with ``windowsHide: true``
+    and a PyInstaller console bundle (the TextIOWrapper sometimes waits for
+    a large block fill instead of returning as soon as a newline arrives on
+    the underlying pipe).
+    """
+    import os
+
+    buf = bytearray()
+    while len(buf) < max_bytes:
+        try:
+            chunk = os.read(0, 4096)
+        except OSError as exc:
+            _diag(f"os.read raised: {exc!r}")
+            return None
+        if not chunk:
+            # EOF on stdin -> parent closed the pipe.
+            return None
+        buf.extend(chunk)
+        nl = buf.find(b"\n")
+        if nl >= 0:
+            line = bytes(buf[:nl])
+            # We only ever expect one request per chunk in practice, but if the
+            # pipe happened to deliver two concatenated requests we'd drop the
+            # remainder. That's acceptable because Electron always awaits one
+            # response before sending the next request.
+            return line
+    _diag(f"line exceeded max {max_bytes} bytes without newline, dropping")
+    return b""
+
+
 def run_daemon() -> int:
     """Daemon protocol: one JSON request per line on stdin, one response per line
     on stdout. Empty line / EOF / parse errors are tolerated; the loop only
     exits on EOF. All exceptions are caught and returned as JSON so that a
     single bad request never kills the worker.
     """
-    stdin = sys.stdin
+    import os
+
+    # Self-report the environment so we can verify from main.log that the
+    # bundled PyInstaller exe is actually running (not a stray system Python).
+    _diag(
+        f"boot pid={os.getpid()} exe={sys.executable} "
+        f"stdin_tty={getattr(sys.stdin, 'isatty', lambda: None)()} "
+        f"stdout_tty={getattr(sys.stdout, 'isatty', lambda: None)()}"
+    )
+
     stdout = sys.stdout
     # Announce readiness BEFORE importing any heavy dependency. The Electron
     # side only needs to know stdin/stdout are alive; the real import cost is
     # paid lazily inside ``dispatch`` on the first request.
     stdout.write(json.dumps({"ready": True}) + "\n")
     stdout.flush()
+    _diag("ready sent, entering read loop (raw os.read on fd 0)")
+
     while True:
-        line = stdin.readline()
-        if not line:
+        raw = _read_line_raw()
+        if raw is None:
+            _diag("stdin EOF, exiting loop")
             break
-        line = line.strip()
+        if not raw:
+            continue
+        try:
+            line = raw.decode("utf-8", errors="replace").strip()
+        except Exception as exc:  # noqa: BLE001
+            _diag(f"decode failed: {exc!r}")
+            continue
         if not line:
             continue
+        _diag(f"received {len(line)} chars")
         request_id = None
         try:
             request = json.loads(line)
             request_id = request.get("id")
+            action = request.get("action")
+            _diag(f"dispatch id={request_id} action={action}")
             result = handle(request)
+            _diag(f"dispatch done id={request_id} success={result.get('success')}")
         except Exception as exc:  # noqa: BLE001
+            _diag(f"dispatch crashed id={request_id}: {exc!r}")
             result = fail(f"{exc}\n{traceback.format_exc(limit=6)}")
         if request_id is not None:
             result["id"] = request_id

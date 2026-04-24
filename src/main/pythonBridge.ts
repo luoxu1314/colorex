@@ -113,6 +113,10 @@ function handleStdout(chunk: string): void {
           const entry = pending.get(msg.id)!
           clearTimeout(entry.timeout)
           pending.delete(msg.id)
+          log.info('[pythonBridge] response received', {
+            id: msg.id,
+            success: msg.success
+          })
           entry.resolve(msg)
         }
         // Messages without id (e.g. ready banner) are handled by the start
@@ -280,15 +284,26 @@ export async function runPython(action: string, payload: unknown): Promise<Pytho
     pending.set(id, { resolve, timeout })
 
     const payload_line = JSON.stringify({ id, action, payload }) + '\n'
+    const byteLen = Buffer.byteLength(payload_line, 'utf8')
+    log.info('[pythonBridge] write request', { id, action, bytes: byteLen })
     try {
-      current.stdin.write(payload_line, 'utf8', (err) => {
-        if (err && pending.has(id)) {
-          pending.delete(id)
-          clearTimeout(timeout)
-          resolve({ success: false, error: `写入 Python 后台失败：${err.message}` })
+      const drained = current.stdin.write(payload_line, 'utf8', (err) => {
+        if (err) {
+          log.error('[pythonBridge] stdin write error', { id, action, error: err.message })
+          if (pending.has(id)) {
+            pending.delete(id)
+            clearTimeout(timeout)
+            resolve({ success: false, error: `写入 Python 后台失败：${err.message}` })
+          }
+          return
         }
+        log.debug('[pythonBridge] stdin write flushed', { id, action, bytes: byteLen })
       })
+      if (!drained) {
+        log.warn('[pythonBridge] stdin backpressure, pipe buffer full', { id, action })
+      }
     } catch (error) {
+      log.error('[pythonBridge] stdin write threw', { id, action, error: (error as Error).message })
       pending.delete(id)
       clearTimeout(timeout)
       resolve({ success: false, error: `写入 Python 后台失败：${(error as Error).message}` })

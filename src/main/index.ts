@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { registerIpc } from './ipc'
-import { shutdownPythonBridge } from './pythonBridge'
+import { runPython, shutdownPythonBridge } from './pythonBridge'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -80,6 +80,30 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
+
+  // Preheat the Python daemon in the background so the first real preview /
+  // mosaic request doesn't stall on cold numpy/PIL imports (which can take
+  // 30–90 s on a freshly installed Windows box while Defender scans the
+  // PyInstaller _internal DLLs). Failures are non-fatal — when the user
+  // eventually clicks "generate preview" the lazy import path still works.
+  const preheatStart = Date.now()
+  void runPython('warmup', { stages: ['preview'] })
+    .then((result) => {
+      log.info('[preheat] preview stage done', {
+        ms: Date.now() - preheatStart,
+        result
+      })
+      const mosaicStart = Date.now()
+      return runPython('warmup', { stages: ['mosaic'] }).then((mosaicResult) => {
+        log.info('[preheat] mosaic stage done', {
+          ms: Date.now() - mosaicStart,
+          result: mosaicResult
+        })
+      })
+    })
+    .catch((error) => {
+      log.warn('[preheat] failed (non-fatal)', error)
+    })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
