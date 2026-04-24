@@ -102,11 +102,38 @@ def render_mosaic(
 
     grid_w_px = n_cols * tile_size
     grid_h_px = n_rows * tile_size
-    reserve = max(0.05, min(0.4, settings.colorbar_reserve_ratio)) if has_cbar else 0
-    right_px = round(grid_w_px * (reserve / (1 - reserve))) if has_cbar else 0
-    width_px = grid_w_px + right_px
     height_px = grid_h_px
     dpi = settings.dpi
+
+    # ``cbar_font_size`` depends only on grid height + dpi, so we can resolve
+    # it before the reserve calculation. That lets us auto-expand the right-
+    # hand reserve to guarantee enough room for tick labels AND a vertically
+    # rotated colorbar label — otherwise longer labels (e.g. "Normalized
+    # intensity") overflow past the figure edge.
+    cbar_font_size = _colorbar_font_size(settings, height_px, dpi) if has_cbar else 0
+
+    user_reserve = max(0.05, min(0.4, settings.colorbar_reserve_ratio)) if has_cbar else 0
+    if has_cbar:
+        # Tight estimate of the min width (px) needed to the right of the
+        # mosaic so ticks + rotated label + a small safety margin fit without
+        # clipping the figure edge. Coefficients calibrated against actual
+        # matplotlib renders (see smoke test in the chat history).
+        font_px = cbar_font_size * dpi / 72.0
+        cbar_px_est = max(20.0, settings.colorbar_width * grid_w_px)
+        tick_label_px = 2.1 * font_px         # "0.25" / "1.0" width + tiny pad
+        rot_label_px = 1.1 * font_px if settings.colorbar_label else 0.0
+        gap_px = 22.0 if settings.colorbar_label else 14.0
+        required_right_px = cbar_px_est + tick_label_px + rot_label_px + gap_px
+        required_reserve = required_right_px / (grid_w_px + required_right_px)
+        # Respect the user's setting as a floor only when they've explicitly
+        # asked for MORE space than we need; otherwise use the tight auto
+        # value so no-label renders don't over-reserve blank margin.
+        reserve = min(0.42, max(user_reserve, required_reserve))
+    else:
+        reserve = 0
+
+    right_px = round(grid_w_px * (reserve / (1 - reserve))) if has_cbar else 0
+    width_px = grid_w_px + right_px
 
     fig = plt.figure(figsize=(width_px / dpi, height_px / dpi), dpi=dpi, facecolor=face)
     if settings.transparent_background or settings.background_mode == "transparent":
@@ -119,7 +146,8 @@ def render_mosaic(
 
     labels = [item.label for item in images]
     label_size = _label_font_size(settings, tile_size, labels, dpi)
-    cbar_font_size = _colorbar_font_size(settings, height_px, dpi)
+    # cbar_font_size was already resolved above so that the right-hand reserve
+    # could accommodate the rotated colorbar label. Reuse it here.
 
     for idx, arr in enumerate(arrays):
         row = idx // n_cols
@@ -164,18 +192,60 @@ def render_mosaic(
 
     if has_cbar:
         right_area = max(0.001, right_px / width_px)
+
+        # Font height expressed as a fraction of the figure width, used to
+        # reserve space to the right of the colorbar for tick numbers and the
+        # vertically rotated colorbar label. (1 pt = dpi/72 px.)
+        font_frac = cbar_font_size * dpi / 72.0 / max(1, width_px)
+
+        has_rot_label = bool(settings.colorbar_label)
+        # Budgets (figure-width fractions) calibrated against real matplotlib
+        # renders. Previously we over-reserved ~50+ px of blank right margin;
+        # these tighter coefficients leave ~10–15 px of safety.
+        tick_label_budget = 2.0 * font_frac           # "0.25" / "1.0" width
+        label_pad_budget = (4.0 / 72.0) * dpi / max(1, width_px)  # labelpad in fig fraction
+        rot_label_budget = (1.0 * font_frac + label_pad_budget) if has_rot_label else 0.0
+        edge_safety = 0.004
+
+        right_side_budget = tick_label_budget + rot_label_budget + edge_safety
+
+        # Colorbar width: obey the user setting but cap at a sensible slice
+        # of the reserved area so there's always room for labels.
         cbar_width = max(0.010, min(settings.colorbar_width, right_area * 0.22))
-        cbar_left = min(0.97 - cbar_width, grid_w_px / width_px + right_area * 0.24)
+
+        # Work backwards from the safe right edge so nothing clips the figure.
+        max_left = 1.0 - right_side_budget - cbar_width
+        # Preferred position: tuck the cbar close to the mosaic edge so the
+        # reserved column is dominated by ticks + label rather than empty gap.
+        preferred_left = grid_w_px / width_px + right_area * 0.12
+        cbar_left = min(preferred_left, max_left)
+        # Never overlap the mosaic tiles.
+        cbar_left = max(cbar_left, grid_w_px / width_px + right_area * 0.05)
+
         cax = fig.add_axes([cbar_left, 0.04, cbar_width, 0.92])
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, cax=cax, orientation="vertical", ticks=_ticks(settings))
         cbar.ax.yaxis.set_ticks_position("right")
         cbar.ax.yaxis.set_label_position("right")
-        cbar.ax.tick_params(colors="white", labelsize=cbar_font_size, direction="in", width=1.2, length=4)
+        cbar.ax.tick_params(
+            colors="white", labelsize=cbar_font_size, direction="in", width=1.2, length=4
+        )
         cbar.outline.set_edgecolor("white")
         cbar.outline.set_linewidth(1.2)
-        cbar.set_label(settings.colorbar_label, color="white", fontsize=cbar_font_size, fontfamily=settings.label_font_family)
+
+        # Vertical rotated label on the right, MATLAB/scientific convention.
+        # The reserve ratio at the top of this function was already inflated
+        # so that tick_label_budget + rot_label_budget fit without clipping,
+        # regardless of how long the user's label string is.
+        if has_rot_label:
+            cbar.set_label(
+                settings.colorbar_label,
+                color="white",
+                fontsize=cbar_font_size,
+                fontfamily=settings.label_font_family,
+                labelpad=4,
+            )
 
     save_path = _ensure_output_path(output_path, settings.output_format) if output_path else None
     preview = preview_path or str(Path(tempfile.gettempdir()) / f"colorexchange_preview_{uuid.uuid4().hex}.png")

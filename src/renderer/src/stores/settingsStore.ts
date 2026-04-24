@@ -15,7 +15,7 @@ function defaultSettings(): RenderSettings {
     colormap: 'jet',
     columns: 2,
     backgroundMode: 'colormap',
-    colorbarReserveRatio: 0.16,
+    colorbarReserveRatio: 0.1,
     showColorbar: true,
     colorbarLabel: 'Pixel intensity',
     colorbarFontSize: 20,
@@ -45,7 +45,18 @@ function loadInitial(): RenderSettings {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return base
     const saved = JSON.parse(raw) as Partial<RenderSettings>
-    return { ...base, ...saved }
+    const merged = { ...base, ...saved }
+    // Migration: the old default for colorbarReserveRatio was 0.16, which
+    // produced very wide blank right margins. The auto-reserve logic in
+    // python/mosaic_renderer.py now computes a tight value, and the new
+    // default is 0.10. Users who never touched the slider should be moved
+    // onto the new default automatically. (Values the user explicitly set
+    // to anything else are preserved.)
+    if (saved && typeof saved.colorbarReserveRatio === 'number'
+        && Math.abs(saved.colorbarReserveRatio - 0.16) < 1e-6) {
+      merged.colorbarReserveRatio = 0.10
+    }
+    return merged
   } catch {
     return base
   }

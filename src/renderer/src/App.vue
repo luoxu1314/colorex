@@ -176,7 +176,7 @@ async function onWindowDrop(event: DragEvent) {
   const paths: string[] = []
   const rejected: string[] = []
   for (const file of files) {
-    const p = typeof getPath === 'function' ? getPath(file) : ''
+    const p = typeof getPath === 'function' ? await getPath(file) : ''
     if (!p) {
       rejected.push(file.name || '(unknown)')
       continue
@@ -286,6 +286,8 @@ async function convertSingle() {
     } else {
       appendLog(`错误：${result.error ?? '未知错误'}`, 'error')
     }
+  } catch (error) {
+    appendLog(`错误：${error instanceof Error ? error.message : String(error)}`, 'error')
   } finally {
     busy.value = false
   }
@@ -372,6 +374,14 @@ onBeforeUnmount(() => {
           <div class="brand-title">ColorExchange</div>
           <div class="brand-caption">Pseudo-color mosaic for scientific images</div>
         </div>
+        <span
+          class="status-chip"
+          :data-state="busy ? 'busy' : 'ready'"
+          :title="busy ? 'Python 后台正在处理' : 'Python 后台就绪'"
+        >
+          <span class="status-chip-dot" aria-hidden="true"></span>
+          <span>{{ busy ? '处理中' : '就绪' }}</span>
+        </span>
       </div>
       <div class="header-actions">
         <button class="header-btn" title="Ctrl/⌘ + O" @click="addImages">
@@ -393,6 +403,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+
+    <div v-if="busy" class="app-progress" aria-hidden="true"></div>
 
     <main class="app-shell">
       <section class="sidebar">

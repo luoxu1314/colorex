@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { registerIpc } from './ipc'
+import { isApproved } from './pathAccess'
 import { runPython, shutdownPythonBridge } from './pythonBridge'
 
 log.initialize()
@@ -74,6 +75,10 @@ app.whenReady().then(() => {
     const filePath = url.searchParams.get('path')
     if (!filePath) {
       return new Response('Missing path', { status: 400 })
+    }
+    if (!isApproved(filePath)) {
+      log.warn('[protocol] rejected unapproved path request', { filePath })
+      return new Response('Forbidden', { status: 403 })
     }
     return net.fetch(pathToFileURL(filePath).toString())
   })

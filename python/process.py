@@ -124,6 +124,16 @@ def _diag(msg: str) -> None:
         pass
 
 
+# Persistent stdin buffer: preserves bytes across calls so that
+# ``os.read`` chunks containing multiple newline-terminated JSON requests are
+# handled correctly instead of silently dropping the trailing request.
+_stdin_buffer: bytearray = bytearray()
+# When True, the current logical line has already exceeded ``max_bytes`` and we
+# are draining the remainder of it until the next newline. Prevents protocol
+# desynchronization on oversized or malformed input.
+_stdin_oversize: bool = False
+
+
 def _read_line_raw(max_bytes: int = 16 * 1024 * 1024) -> bytes | None:
     """Read a single \\n-terminated line from fd 0 using ``os.read`` directly.
 
@@ -132,30 +142,58 @@ def _read_line_raw(max_bytes: int = 16 * 1024 * 1024) -> bytes | None:
     and a PyInstaller console bundle (the TextIOWrapper sometimes waits for
     a large block fill instead of returning as soon as a newline arrives on
     the underlying pipe).
+
+    Returns:
+        * ``bytes`` containing the line payload without the trailing newline.
+        * ``None`` on EOF or unrecoverable ``os.read`` failure.
+        * ``b""`` once, to signal that a line exceeded ``max_bytes`` and the
+          rest of that line has been drained; the caller should surface a
+          protocol error to the client but may safely continue reading.
     """
     import os
 
-    buf = bytearray()
-    while len(buf) < max_bytes:
+    global _stdin_oversize
+
+    while True:
+        nl = _stdin_buffer.find(b"\n")
+        if nl >= 0:
+            line = bytes(_stdin_buffer[:nl])
+            del _stdin_buffer[: nl + 1]
+            if _stdin_oversize:
+                # Tail of a previously-oversized line -> throw it away and
+                # keep looking for the next real line.
+                _stdin_oversize = False
+                _diag("drained oversized line remainder")
+                continue
+            return line
+
+        # Either the buffer is building a normal line or we are mid-drain.
+        if len(_stdin_buffer) >= max_bytes and not _stdin_oversize:
+            _diag(f"line exceeded max {max_bytes} bytes, starting drain to next \\n")
+            _stdin_oversize = True
+            _stdin_buffer.clear()
+            return b""
+
         try:
-            chunk = os.read(0, 4096)
+            chunk = os.read(0, 65536)
         except OSError as exc:
             _diag(f"os.read raised: {exc!r}")
             return None
         if not chunk:
-            # EOF on stdin -> parent closed the pipe.
             return None
-        buf.extend(chunk)
-        nl = buf.find(b"\n")
-        if nl >= 0:
-            line = bytes(buf[:nl])
-            # We only ever expect one request per chunk in practice, but if the
-            # pipe happened to deliver two concatenated requests we'd drop the
-            # remainder. That's acceptable because Electron always awaits one
-            # response before sending the next request.
-            return line
-    _diag(f"line exceeded max {max_bytes} bytes without newline, dropping")
-    return b""
+
+        if _stdin_oversize:
+            idx = chunk.find(b"\n")
+            if idx < 0:
+                # Still inside the oversized line; keep dropping.
+                continue
+            # Found end of the bad line; keep whatever followed.
+            _stdin_buffer.extend(chunk[idx + 1 :])
+            _stdin_oversize = False
+            _diag("drained oversized line remainder")
+            continue
+
+        _stdin_buffer.extend(chunk)
 
 
 def run_daemon() -> int:
@@ -188,6 +226,23 @@ def run_daemon() -> int:
             _diag("stdin EOF, exiting loop")
             break
         if not raw:
+            # b"" means an oversized line was drained and the protocol is
+            # realigned again. There is no id to correlate (we threw the bytes
+            # away) so we can only surface a generic error; Electron's per-
+            # request timeout will already have fired for the caller.
+            try:
+                stdout.write(
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": "请求超出单行 16MB 上限，已丢弃并继续监听。",
+                        }
+                    )
+                    + "\n"
+                )
+                stdout.flush()
+            except Exception:  # noqa: BLE001
+                pass
             continue
         try:
             line = raw.decode("utf-8", errors="replace").strip()

@@ -25,12 +25,21 @@ const api = {
     ipcRenderer.invoke('preview:buildTiff', inputPath),
   revealInFolder: (targetPath: string): Promise<RevealResult> =>
     ipcRenderer.invoke('shell:revealInFolder', targetPath),
-  getDroppedFilePath: (file: File): string => {
+  getDroppedFilePath: async (file: File): Promise<string> => {
+    let path = ''
     try {
-      return webUtils.getPathForFile(file)
+      path = webUtils.getPathForFile(file)
     } catch {
-      return ''
+      path = ''
     }
+    if (path) {
+      try {
+        await ipcRenderer.invoke('path:approve', path)
+      } catch {
+        // approval is best-effort; protocol handler will still reject if needed
+      }
+    }
+    return path
   }
 }
 

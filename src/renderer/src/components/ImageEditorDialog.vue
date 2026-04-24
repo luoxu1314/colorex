@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { CropMargins, ImageItem } from '../types/image'
 import { Crop, Maximize2, Minus, Plus, Scan, Square, X } from 'lucide-vue-next'
 
@@ -14,11 +14,28 @@ const scale = ref(1)
 const tx = ref(0)
 const ty = ref(0)
 const drag = ref(false)
-const cropDrag = ref<null | { mode: string; x: number; y: number; start: CropMargins }>(null)
 const last = ref({ x: 0, y: 0 })
 const aspectLock = ref(true)
 const naturalW = ref(0)
 const naturalH = ref(0)
+
+// Minimum crop side in image pixels — large enough to hit, small enough to
+// not feel constrained on tiny thumbnails.
+const MIN_CROP_PX = 4
+
+// We store drag state fully in IMAGE PIXEL space. Everything about aspect
+// constraints is decided in image pixels, then we convert back to normalized
+// CropMargins at the very end. This is the standard crop-editor approach
+// (Photoshop, Lightroom, etc.) and sidesteps any CSS-layout mismatch.
+type PxRect = { x0: number; y0: number; x1: number; y1: number }
+const cropDrag = ref<null | {
+  mode: string
+  startClientX: number
+  startClientY: number
+  startRect: PxRect
+  frameW: number // rendered frame width in screen px, for dx/dy → image-px conversion
+  frameH: number
+}>(null)
 
 const url = computed(() => {
   const target = props.image.previewPath || props.image.path
@@ -30,6 +47,14 @@ const previewPending = computed(
 )
 
 const zoomPercent = computed(() => Math.round(scale.value * 100))
+
+const frameStyle = computed(() => {
+  const aspect = naturalW.value && naturalH.value ? naturalW.value / naturalH.value : 1
+  return {
+    transform: `translate(${tx.value}px, ${ty.value}px) scale(${scale.value})`,
+    aspectRatio: `${aspect}`,
+  }
+})
 
 function onImageLoad(event: Event) {
   const img = event.target as HTMLImageElement
@@ -56,189 +81,238 @@ const cropStyle = computed(() => ({
   bottom: `${(props.image.crop.enabled ? props.image.crop.bottom : 0) * 100}%`
 }))
 
-function clamp(v: number, lo: number, hi: number) {
+function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v))
 }
 
-function imageAspect() {
-  if (!naturalW.value || !naturalH.value) return 1
-  return naturalW.value / naturalH.value
+function cropRectFromProps(): PxRect {
+  const W = Math.max(1, naturalW.value || 1)
+  const H = Math.max(1, naturalH.value || 1)
+  const { left, right, top, bottom, enabled } = props.image.crop
+  if (!enabled) return { x0: 0, y0: 0, x1: W, y1: H }
+  return { x0: left * W, y0: top * H, x1: (1 - right) * W, y1: (1 - bottom) * H }
 }
 
-function enableCrop() {
+function initialSquareRect(): PxRect {
+  const W = Math.max(1, naturalW.value || 1)
+  const H = Math.max(1, naturalH.value || 1)
+  const side = 0.8 * Math.min(W, H)
+  const x0 = (W - side) / 2
+  const y0 = (H - side) / 2
+  return { x0, y0, x1: x0 + side, y1: y0 + side }
+}
+
+function emitRect(rect: PxRect): void {
+  const W = Math.max(1, naturalW.value || 1)
+  const H = Math.max(1, naturalH.value || 1)
+  emit('update-crop', {
+    enabled: true,
+    left: clamp(rect.x0 / W, 0, 1),
+    right: clamp(1 - rect.x1 / W, 0, 1),
+    top: clamp(rect.y0 / H, 0, 1),
+    bottom: clamp(1 - rect.y1 / H, 0, 1),
+  })
+}
+
+function enableCrop(): void {
   if (props.image.crop.enabled) return
   if (aspectLock.value && naturalW.value && naturalH.value) {
-    // Center a 1:1 crop (in pixel space) that spans ~80% of the shorter axis.
-    const aspect = imageAspect()
-    if (aspect >= 1) {
-      // image wider than tall: square side = 0.8 * height_px (in normalized height 0.8)
-      const sideW = 0.8 / aspect
-      const leftOrRight = (1 - sideW) / 2
-      emit('update-crop', {
-        enabled: true,
-        left: leftOrRight,
-        right: leftOrRight,
-        top: 0.1,
-        bottom: 0.1
-      })
-    } else {
-      const sideH = 0.8 * aspect
-      const topOrBottom = (1 - sideH) / 2
-      emit('update-crop', {
-        enabled: true,
-        left: 0.1,
-        right: 0.1,
-        top: topOrBottom,
-        bottom: topOrBottom
-      })
-    }
+    emitRect(initialSquareRect())
   } else {
     emit('update-crop', { enabled: true })
   }
 }
 
-function toggleAspectLock() {
-  aspectLock.value = !aspectLock.value
-  // If enabling aspect lock on an existing non-square crop, reshape to square
-  // around the current center using the opposite side as anchor.
-  if (aspectLock.value && props.image.crop.enabled) {
-    const { left, right, top, bottom } = props.image.crop
-    const cropWn = 1 - left - right
-    const cropHn = 1 - top - bottom
-    const aspect = imageAspect()
-    const cropWpx = cropWn
-    const cropHpx = cropHn / aspect // Express both in the same "x" coordinate units; 1:1 means cropWn == cropHn/aspect
-    if (Math.abs(cropWpx - cropHpx) < 1e-3) return
-    // Shrink the larger side to match the smaller one, centered.
-    if (cropWpx > cropHpx) {
-      const newCropWn = cropHn / aspect
-      const centerX = (left + (1 - right)) / 2
-      const half = newCropWn / 2
-      emit('update-crop', {
-        enabled: true,
-        left: clamp(centerX - half, 0, 1),
-        right: clamp(1 - (centerX + half), 0, 1)
-      })
-    } else {
-      const newCropHn = cropWn * aspect
-      const centerY = (top + (1 - bottom)) / 2
-      const half = newCropHn / 2
-      emit('update-crop', {
-        enabled: true,
-        top: clamp(centerY - half, 0, 1),
-        bottom: clamp(1 - (centerY + half), 0, 1)
-      })
-    }
-  }
+function currentCropIsSquare(): boolean {
+  if (!props.image.crop.enabled) return false
+  if (!naturalW.value || !naturalH.value) return false
+  const r = cropRectFromProps()
+  return Math.abs(r.x1 - r.x0 - (r.y1 - r.y0)) < 0.5
 }
 
-function startCropDrag(mode: string, event: PointerEvent) {
+function reshapeCurrentToSquare(): void {
+  if (!props.image.crop.enabled) return
+  const W = Math.max(1, naturalW.value || 1)
+  const H = Math.max(1, naturalH.value || 1)
+  const r = cropRectFromProps()
+  const side = Math.min(r.x1 - r.x0, r.y1 - r.y0)
+  const cx = (r.x0 + r.x1) / 2
+  const cy = (r.y0 + r.y1) / 2
+  const half = side / 2
+  let x0 = cx - half
+  let x1 = cx + half
+  let y0 = cy - half
+  let y1 = cy + half
+  if (x0 < 0) { x1 -= x0; x0 = 0 }
+  if (x1 > W) { x0 -= x1 - W; x1 = W }
+  if (y0 < 0) { y1 -= y0; y0 = 0 }
+  if (y1 > H) { y0 -= y1 - H; y1 = H }
+  emitRect({ x0, y0, x1, y1 })
+}
+
+function toggleAspectLock(): void {
+  // Three cases make the UX feel predictable:
+  //   1. Locked + already square  → unlock (switch to free-form).
+  //   2. Locked + NOT square      → keep locked, reshape to square NOW.
+  //   3. Unlocked                 → lock, reshape to square if needed.
+  // This means clicking "1:1" always results in either (a) a square crop
+  // with the lock on, or (b) the current crop with the lock off — never
+  // the confusing "lock on, but crop still rectangular" state.
+  const isSquare = currentCropIsSquare()
+  if (aspectLock.value && isSquare) {
+    aspectLock.value = false
+    return
+  }
+  aspectLock.value = true
+  if (!isSquare) reshapeCurrentToSquare()
+}
+
+// When the dialog opens (or when the image's natural size becomes known),
+// sync aspectLock to reflect whether the persisted crop is actually square.
+// This prevents the confusing state where the button is shown as "1:1 on"
+// while the crop is rectangular, carried over from an earlier session.
+let lockSynced = false
+watch(
+  [naturalW, naturalH, () => props.image.crop.enabled],
+  () => {
+    if (lockSynced) return
+    if (!naturalW.value || !naturalH.value) return
+    if (!props.image.crop.enabled) {
+      lockSynced = true
+      return
+    }
+    aspectLock.value = currentCropIsSquare()
+    lockSynced = true
+  },
+  { immediate: true }
+)
+
+function startCropDrag(mode: string, event: PointerEvent): void {
   event.preventDefault()
   event.stopPropagation()
+  const wasEnabled = props.image.crop.enabled
   enableCrop()
   const target = event.currentTarget as HTMLElement
   target.setPointerCapture?.(event.pointerId)
+
+  const frame =
+    (target.closest('.editor-canvas') as HTMLElement | null)?.querySelector(
+      '.image-frame'
+    ) as HTMLElement | null
+  const rect = frame?.getBoundingClientRect()
+  // Resolve the "starting" image-pixel rect synchronously. If enableCrop()
+  // just initialized the crop, the parent's state-update hasn't arrived via
+  // props yet — use the same initial rect directly.
+  let startRect: PxRect
+  if (!wasEnabled) {
+    startRect =
+      aspectLock.value && naturalW.value && naturalH.value
+        ? initialSquareRect()
+        : { x0: 0, y0: 0, x1: naturalW.value || 1, y1: naturalH.value || 1 }
+  } else {
+    startRect = cropRectFromProps()
+  }
+
   cropDrag.value = {
     mode,
-    x: event.clientX,
-    y: event.clientY,
-    start: { ...props.image.crop, enabled: true }
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startRect,
+    frameW: Math.max(1, rect?.width || 1),
+    frameH: Math.max(1, rect?.height || 1),
   }
 }
 
-function moveCrop(event: PointerEvent) {
-  if (!cropDrag.value) return
-  const frame = (event.currentTarget as HTMLElement).querySelector(
-    '.image-frame'
-  ) as HTMLElement | null
-  if (!frame) return
-  const rect = frame.getBoundingClientRect()
-  const dx = (event.clientX - cropDrag.value.x) / Math.max(1, rect.width)
-  const dy = (event.clientY - cropDrag.value.y) / Math.max(1, rect.height)
-  const start = cropDrag.value.start
-  const mode = cropDrag.value.mode
-  const next: Partial<CropMargins> = { enabled: true }
+function moveCrop(event: PointerEvent): void {
+  const d = cropDrag.value
+  if (!d) return
+  const W = Math.max(1, naturalW.value || 1)
+  const H = Math.max(1, naturalH.value || 1)
+  const s = d.startRect
+  const mode = d.mode
 
-  if (mode.includes('move')) {
-    const cropW = 1 - start.left - start.right
-    const cropH = 1 - start.top - start.bottom
-    const left = clamp(start.left + dx, 0, 1 - cropW)
-    const top = clamp(start.top + dy, 0, 1 - cropH)
-    next.left = left
-    next.right = 1 - cropW - left
-    next.top = top
-    next.bottom = 1 - cropH - top
-    emit('update-crop', next)
+  // Convert screen-pixel drag delta → image-pixel delta.
+  const dxPx = ((event.clientX - d.startClientX) / d.frameW) * W
+  const dyPx = ((event.clientY - d.startClientY) / d.frameH) * H
+
+  if (mode === 'move') {
+    const w = s.x1 - s.x0
+    const h = s.y1 - s.y0
+    const x0 = clamp(s.x0 + dxPx, 0, W - w)
+    const y0 = clamp(s.y0 + dyPx, 0, H - h)
+    emitRect({ x0, y0, x1: x0 + w, y1: y0 + h })
     return
   }
 
-  let L = start.left
-  let R = start.right
-  let T = start.top
-  let B = start.bottom
-  if (mode.includes('w')) L = clamp(start.left + dx, 0, 1 - start.right - 0.02)
-  if (mode.includes('e')) R = clamp(start.right - dx, 0, 1 - start.left - 0.02)
-  if (mode.includes('n')) T = clamp(start.top + dy, 0, 1 - start.bottom - 0.02)
-  if (mode.includes('s')) B = clamp(start.bottom - dy, 0, 1 - start.top - 0.02)
+  // 1) Free-form edit: move the edges that the handle controls.
+  let x0 = s.x0
+  let y0 = s.y0
+  let x1 = s.x1
+  let y1 = s.y1
+  if (mode.includes('w')) x0 = clamp(s.x0 + dxPx, 0, s.x1 - MIN_CROP_PX)
+  if (mode.includes('e')) x1 = clamp(s.x1 + dxPx, s.x0 + MIN_CROP_PX, W)
+  if (mode.includes('n')) y0 = clamp(s.y0 + dyPx, 0, s.y1 - MIN_CROP_PX)
+  if (mode.includes('s')) y1 = clamp(s.y1 + dyPx, s.y0 + MIN_CROP_PX, H)
 
-  if (aspectLock.value && naturalW.value && naturalH.value) {
-    const aspect = imageAspect()
-    const cropWn = 1 - L - R
-    const cropHn = 1 - T - B
-    // 1:1 in pixel space => cropWn * W == cropHn * H => cropHn = cropWn / aspect
-    const horizontalEdge = mode === 'w' || mode === 'e'
-    const verticalEdge = mode === 'n' || mode === 's'
-    if (horizontalEdge) {
-      const targetCropHn = cropWn / aspect
-      const centerY = (start.top + (1 - start.bottom)) / 2
-      const half = targetCropHn / 2
-      T = clamp(centerY - half, 0, 1)
-      B = clamp(1 - (centerY + half), 0, 1)
-    } else if (verticalEdge) {
-      const targetCropWn = cropHn * aspect
-      const centerX = (start.left + (1 - start.right)) / 2
-      const half = targetCropWn / 2
-      L = clamp(centerX - half, 0, 1)
-      R = clamp(1 - (centerX + half), 0, 1)
-    } else {
-      // Corner: anchor the opposite corner; adjust the other axis to match 1:1.
-      const anchorX = mode.includes('w') ? 1 - start.right : start.left
-      const anchorY = mode.includes('n') ? 1 - start.bottom : start.top
-      const currentWn = 1 - L - R
-      const currentHn = 1 - T - B
-      // Use whichever drag was larger (in normalized image space) to drive.
-      const driveW = Math.abs(currentWn - (1 - start.left - start.right))
-      const driveH = Math.abs(currentHn - (1 - start.top - start.bottom))
-      if (driveW >= driveH) {
-        const targetHn = currentWn / aspect
-        if (mode.includes('n')) {
-          T = clamp(anchorY - targetHn, 0, 1)
-        } else {
-          B = clamp(1 - (anchorY + targetHn), 0, 1)
-        }
-      } else {
-        const targetWn = currentHn * aspect
-        if (mode.includes('w')) {
-          L = clamp(anchorX - targetWn, 0, 1)
-        } else {
-          R = clamp(1 - (anchorX + targetWn), 0, 1)
-        }
+  // 2) If aspect is locked, force square in IMAGE PIXELS.
+  if (aspectLock.value) {
+    const isHorizontalEdge = mode === 'w' || mode === 'e'
+    const isVerticalEdge = mode === 'n' || mode === 's'
+
+    if (isHorizontalEdge) {
+      // Keep vertical center stable; match height to width.
+      let side = x1 - x0
+      const cy = (s.y0 + s.y1) / 2
+      // If the square would overflow top/bottom, shrink side so it fits.
+      const maxSideByY = 2 * Math.min(cy, H - cy)
+      if (side > maxSideByY) {
+        side = maxSideByY
+        if (mode === 'w') x0 = x1 - side
+        else x1 = x0 + side
       }
+      side = Math.max(side, MIN_CROP_PX)
+      y0 = cy - side / 2
+      y1 = cy + side / 2
+    } else if (isVerticalEdge) {
+      // Keep horizontal center stable; match width to height.
+      let side = y1 - y0
+      const cx = (s.x0 + s.x1) / 2
+      const maxSideByX = 2 * Math.min(cx, W - cx)
+      if (side > maxSideByX) {
+        side = maxSideByX
+        if (mode === 'n') y0 = y1 - side
+        else y1 = y0 + side
+      }
+      side = Math.max(side, MIN_CROP_PX)
+      x0 = cx - side / 2
+      x1 = cx + side / 2
+    } else {
+      // Corner drag: anchor the OPPOSITE corner and grow/shrink a square.
+      const anchorX = mode.includes('w') ? s.x1 : s.x0
+      const anchorY = mode.includes('n') ? s.y1 : s.y0
+      const sideX = Math.abs((mode.includes('w') ? x0 : x1) - anchorX)
+      const sideY = Math.abs((mode.includes('n') ? y0 : y1) - anchorY)
+      // Square side = min(requestedX, requestedY), clamped to what fits
+      // from the anchor to the image edges.
+      const maxSideX = mode.includes('w') ? anchorX : W - anchorX
+      const maxSideY = mode.includes('n') ? anchorY : H - anchorY
+      let side = Math.min(sideX, sideY, maxSideX, maxSideY)
+      side = Math.max(side, MIN_CROP_PX)
+      if (mode.includes('w')) { x0 = anchorX - side; x1 = anchorX }
+      else { x0 = anchorX; x1 = anchorX + side }
+      if (mode.includes('n')) { y0 = anchorY - side; y1 = anchorY }
+      else { y0 = anchorY; y1 = anchorY + side }
     }
   }
 
-  next.left = L
-  next.right = R
-  next.top = T
-  next.bottom = B
-  emit('update-crop', next)
+  emitRect({ x0, y0, x1, y1 })
 }
 
-function endCropDrag() {
+function endCropDrag(): void {
   cropDrag.value = null
 }
 
-function fit() {
+function fit(): void {
   scale.value = 1
   tx.value = 0
   ty.value = 0
@@ -299,10 +373,7 @@ function fit() {
         @pointercancel="endCropDrag"
       >
         <div v-if="previewPending" class="editor-loading">正在生成 TIFF 预览...</div>
-        <div
-          class="image-frame"
-          :style="{ transform: `translate(${tx}px, ${ty}px) scale(${scale})` }"
-        >
+        <div class="image-frame" :style="frameStyle">
           <img :src="url" draggable="false" @load="onImageLoad" />
           <div
             class="crop-box"

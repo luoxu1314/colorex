@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, type OpenDialogOptions, type SaveDialogOptions }
 import { extname } from 'node:path'
 
 const imageFilters = [
-  { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp'] },
+  { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'bmp', 'webp'] },
   { name: 'All Files', extensions: ['*'] }
 ]
 

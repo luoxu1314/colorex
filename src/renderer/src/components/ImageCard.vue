@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const editing = ref(false)
 const draft = ref(props.item.label)
 const inputRef = ref<HTMLInputElement | null>(null)
+const naturalAspect = ref(1)
 
 const displayPath = computed(() => props.item.previewPath || props.item.path)
 
@@ -44,6 +45,15 @@ const cropActive = computed(
       props.item.crop.right > 0 ||
       props.item.crop.bottom > 0)
 )
+
+const thumbInnerStyle = computed(() => ({ aspectRatio: `${naturalAspect.value}` }))
+
+function onThumbLoad(event: Event): void {
+  const img = event.target as HTMLImageElement
+  const w = img.naturalWidth || 1
+  const h = img.naturalHeight || 1
+  naturalAspect.value = w / h
+}
 
 function startEdit() {
   draft.value = props.item.label
@@ -85,18 +95,20 @@ watch(
   >
     <div class="drag-handle" title="拖拽排序"><GripVertical :size="16" /></div>
     <div class="thumb-wrap" :class="{ cropped: cropActive }">
-      <img
-        v-if="!previewPending"
-        class="thumb"
-        :src="fileUrl"
-        :alt="item.name"
-        loading="lazy"
-      />
       <div v-if="previewPending" class="thumb-placeholder" :title="item.name">生成预览中...</div>
       <div v-else-if="previewFailed" class="thumb-placeholder error" :title="item.previewError">
         预览失败
       </div>
-      <div v-if="cropActive" class="crop-window" :style="{ inset: cropInset }"></div>
+      <div v-else class="thumb-inner" :style="thumbInnerStyle">
+        <img
+          class="thumb"
+          :src="fileUrl"
+          :alt="item.name"
+          loading="lazy"
+          @load="onThumbLoad"
+        />
+        <div v-if="cropActive" class="crop-window" :style="{ inset: cropInset }"></div>
+      </div>
     </div>
     <div class="image-meta">
       <div class="file-name" :title="item.path">{{ item.name }}</div>
