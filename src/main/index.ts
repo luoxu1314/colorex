@@ -1,9 +1,22 @@
 import { app, BrowserWindow, net, protocol, shell } from 'electron'
+import log from 'electron-log/main.js'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { registerIpc } from './ipc'
 import { shutdownPythonBridge } from './pythonBridge'
+
+log.initialize()
+log.transports.file.level = 'info'
+log.transports.console.level = is.dev ? 'debug' : 'info'
+log.info('[app] starting', {
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+  platform: process.platform,
+  arch: process.arch,
+  electron: process.versions.electron,
+  resourcesPath: process.resourcesPath
+})
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -39,6 +52,13 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  // Prevent the renderer from navigating to a dropped file://... URL when the
+  // renderer's drop handler doesn't call preventDefault in time. This keeps the
+  // app from "disappearing" when users drag images onto the window.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('file://')) event.preventDefault()
   })
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {

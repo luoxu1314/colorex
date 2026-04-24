@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 export interface PreviewResult {
   success: boolean
@@ -24,7 +24,14 @@ const api = {
   buildTiffPreview: (inputPath: string): Promise<PreviewResult> =>
     ipcRenderer.invoke('preview:buildTiff', inputPath),
   revealInFolder: (targetPath: string): Promise<RevealResult> =>
-    ipcRenderer.invoke('shell:revealInFolder', targetPath)
+    ipcRenderer.invoke('shell:revealInFolder', targetPath),
+  getDroppedFilePath: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  }
 }
 
 contextBridge.exposeInMainWorld('colorExchange', api)

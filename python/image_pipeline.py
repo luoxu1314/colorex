@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
 from schemas import CropMargins, ImageInput, RenderSettings
+
+# Note: ``cv2`` and ``matplotlib`` are intentionally NOT imported at module
+# level. They are the heaviest cold-start dependencies (opencv alone pulls in
+# dozens of MB of DLLs on Windows) and only a subset of actions need them, so
+# we defer their imports to the functions that actually use them.
 
 
 def read_grayscale(path: str) -> np.ndarray:
@@ -70,6 +74,10 @@ def resize_center_crop_square(arr: np.ndarray, size: int) -> np.ndarray:
     scale = max(size / h, size / w)
     new_w = max(size, int(round(w * scale)))
     new_h = max(size, int(round(h * scale)))
+    # Lazy import: only the mosaic pipeline hits this, preview/convert paths
+    # never do. Keeping cv2 out of module top-level lets the daemon's ready
+    # banner fire ~1s earlier.
+    import cv2
     resized = cv2.resize(arr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
     y1 = max(0, (new_h - size) // 2)
     x1 = max(0, (new_w - size) // 2)

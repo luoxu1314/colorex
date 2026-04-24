@@ -10,7 +10,7 @@ import { needsGeneratedPreview, useImageStore } from './stores/imageStore'
 import { useSettingsStore } from './stores/settingsStore'
 import type { ImageItem, RenderResult } from './types/image'
 import type { LogEntry, LogLevel } from './types/log'
-import { Download, Eye, FilePlus2, Palette, Sparkles, Wand2 } from 'lucide-vue-next'
+import { Download, Eye, FilePlus2, ImagePlus, Palette, Sparkles, Wand2 } from 'lucide-vue-next'
 
 const imageStore = useImageStore()
 const settings = useSettingsStore()
@@ -20,6 +20,12 @@ const outputSize = ref('')
 const busy = ref(false)
 const editorOpen = ref(false)
 const renameSignal = ref(0)
+const dragActive = ref(false)
+const dragHover = ref(false)
+let dragDepth = 0
+let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
+
+const SUPPORTED_EXT_RE = /\.(png|jpe?g|tiff?|bmp|webp)$/i
 
 let logCounter = 0
 const logs = ref<LogEntry[]>([
@@ -81,8 +87,7 @@ async function ensurePreview(item: ImageItem) {
   }
 }
 
-async function addImages() {
-  const paths = await window.colorExchange.openImages()
+async function addPathsToStore(paths: string[]) {
   if (!paths.length) return
   const added = imageStore.addPaths(paths)
   appendLog(`已添加 ${paths.length} 张图像。`, 'success')
@@ -94,6 +99,104 @@ async function addImages() {
   if (tiffs.length) {
     appendLog(`正在为 ${tiffs.length} 张 TIFF 生成预览缩略图...`)
     await Promise.all(tiffs.map(ensurePreview))
+  }
+}
+
+async function addImages() {
+  const paths = await window.colorExchange.openImages()
+  await addPathsToStore(paths)
+}
+
+function clearDragState() {
+  dragDepth = 0
+  dragActive.value = false
+  dragHover.value = false
+  if (dragLeaveTimer) {
+    clearTimeout(dragLeaveTimer)
+    dragLeaveTimer = null
+  }
+}
+
+function hasFilesInDrag(event: DragEvent): boolean {
+  const items = event.dataTransfer?.items
+  if (items && items.length) {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') return true
+    }
+    return false
+  }
+  return Boolean(event.dataTransfer?.types?.includes('Files'))
+}
+
+function onWindowDragEnter(event: DragEvent) {
+  // Only react to external-file drags. Internal drags (e.g. sortable.js row
+  // reorder) carry no 'Files' type so we leave them alone.
+  if (!hasFilesInDrag(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  dragDepth++
+  dragActive.value = true
+}
+
+function onWindowDragOver(event: DragEvent) {
+  // Chrome hides dataTransfer contents during dragover for privacy, so we can
+  // no longer rely on hasFilesInDrag here. Trust the state we locked in at
+  // dragenter and just make sure drop is allowed.
+  if (!dragActive.value) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+  dragHover.value = true
+  if (dragLeaveTimer) {
+    clearTimeout(dragLeaveTimer)
+    dragLeaveTimer = null
+  }
+}
+
+function onWindowDragLeave(event: DragEvent) {
+  if (!dragActive.value) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) {
+    if (dragLeaveTimer) clearTimeout(dragLeaveTimer)
+    dragLeaveTimer = setTimeout(clearDragState, 80)
+  }
+}
+
+async function onWindowDrop(event: DragEvent) {
+  if (!dragActive.value && !hasFilesInDrag(event)) return
+  event.preventDefault()
+  event.stopPropagation()
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  clearDragState()
+  if (!files.length) {
+    appendLog('未识别到拖入的文件。', 'warn')
+    return
+  }
+  const getPath = window.colorExchange.getDroppedFilePath
+  const paths: string[] = []
+  const rejected: string[] = []
+  for (const file of files) {
+    const p = typeof getPath === 'function' ? getPath(file) : ''
+    if (!p) {
+      rejected.push(file.name || '(unknown)')
+      continue
+    }
+    if (!SUPPORTED_EXT_RE.test(p)) {
+      rejected.push(file.name || p)
+      continue
+    }
+    paths.push(p)
+  }
+  if (rejected.length) {
+    appendLog(
+      `已忽略 ${rejected.length} 个不支持/无法解析的文件：${rejected.slice(0, 3).join('、')}${rejected.length > 3 ? '…' : ''}`,
+      'warn'
+    )
+  }
+  if (paths.length) {
+    await addPathsToStore(paths)
+  } else if (!rejected.length) {
+    appendLog('拖入的文件无法获取路径，请尝试从文件管理器拖入真实文件。', 'warn')
   }
 }
 
@@ -245,10 +348,18 @@ function onKeyDown(event: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('dragenter', onWindowDragEnter)
+  window.addEventListener('dragover', onWindowDragOver)
+  window.addEventListener('dragleave', onWindowDragLeave)
+  window.addEventListener('drop', onWindowDrop)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('dragenter', onWindowDragEnter)
+  window.removeEventListener('dragover', onWindowDragOver)
+  window.removeEventListener('dragleave', onWindowDragLeave)
+  window.removeEventListener('drop', onWindowDrop)
 })
 </script>
 
@@ -341,5 +452,17 @@ onBeforeUnmount(() => {
       @reset-crop="imageStore.resetCrop(selectedImage.id)"
       @close="editorOpen = false"
     />
+
+    <Transition name="drop-overlay">
+      <div v-if="dragActive" class="drop-overlay" :class="{ hot: dragHover }">
+        <div class="drop-card">
+          <div class="drop-ring">
+            <ImagePlus :size="34" />
+          </div>
+          <div class="drop-title">松开即可添加图像</div>
+          <div class="drop-caption">支持 png · jpg · tif · bmp · webp · 多选 OK</div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>

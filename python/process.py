@@ -5,10 +5,6 @@ import sys
 import traceback
 from pathlib import Path
 
-from image_pipeline import generate_preview, save_single_pseudocolor
-from mosaic_renderer import render_mosaic
-from schemas import parse_images, parse_settings
-
 
 def ok(result: dict) -> dict:
     result["success"] = bool(result.get("success", True))
@@ -20,15 +16,25 @@ def fail(error: str) -> dict:
 
 
 def dispatch(action: str | None, payload: dict) -> dict:
+    """Route an incoming action.
+
+    Heavy dependencies (numpy / PIL / cv2 / matplotlib) are deferred to the
+    functions that actually need them so that ``run_daemon`` can emit its
+    ``ready`` banner before paying the ~1–60s cold-import cost. The first
+    request pays for whatever modules its action happens to need; subsequent
+    requests hit the module cache.
+    """
+    # schemas.py is cheap (just dataclasses) so importing it is fine.
+    from schemas import parse_images, parse_settings
+
+    if action == "ping":
+        return ok({"success": True, "message": "pong"})
+
     settings = parse_settings(payload.get("settings") or {})
-    if action == "render_mosaic":
-        images = parse_images(payload.get("images") or [])
-        return ok(render_mosaic(images, settings, output_path=payload.get("outputPath")))
-    if action == "convert_single":
-        return ok(
-            save_single_pseudocolor(str(payload["inputPath"]), str(payload["outputPath"]), settings)
-        )
+
     if action == "generate_preview":
+        # Only pulls in numpy + PIL. Does NOT trigger cv2/matplotlib.
+        from image_pipeline import generate_preview
         return ok(
             generate_preview(
                 str(payload["inputPath"]),
@@ -36,8 +42,22 @@ def dispatch(action: str | None, payload: dict) -> dict:
                 int(payload.get("maxSize", 2048)),
             )
         )
-    if action == "ping":
-        return ok({"success": True, "message": "pong"})
+
+    if action == "convert_single":
+        # Needs numpy + PIL + matplotlib (colormap + Normalize).
+        from image_pipeline import save_single_pseudocolor
+        return ok(
+            save_single_pseudocolor(
+                str(payload["inputPath"]), str(payload["outputPath"]), settings
+            )
+        )
+
+    if action == "render_mosaic":
+        # Full dependency surface.
+        from mosaic_renderer import render_mosaic
+        images = parse_images(payload.get("images") or [])
+        return ok(render_mosaic(images, settings, output_path=payload.get("outputPath")))
+
     return fail(f"未知操作：{action}")
 
 
@@ -73,7 +93,9 @@ def run_daemon() -> int:
     """
     stdin = sys.stdin
     stdout = sys.stdout
-    # Announce readiness so the host can start sending work immediately.
+    # Announce readiness BEFORE importing any heavy dependency. The Electron
+    # side only needs to know stdin/stdout are alive; the real import cost is
+    # paid lazily inside ``dispatch`` on the first request.
     stdout.write(json.dumps({"ready": True}) + "\n")
     stdout.flush()
     while True:

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import numpy as np
-from matplotlib import colormaps
-from matplotlib.colors import LinearSegmentedColormap
+
+# matplotlib is intentionally imported lazily inside the helpers below; see
+# ``image_pipeline.py`` for the rationale.
 
 
-def _parula() -> LinearSegmentedColormap:
-    # Compact approximation of MATLAB parula anchor points. Matplotlib has no built-in parula.
+def _parula():
+    """Compact approximation of MATLAB parula. Built on demand."""
+    from matplotlib.colors import LinearSegmentedColormap
+
     anchors = np.array(
         [
             [0.2081, 0.1663, 0.5292],
@@ -23,6 +26,8 @@ def _parula() -> LinearSegmentedColormap:
 
 
 def get_colormap(name: str):
+    from matplotlib import colormaps
+
     key = (name or "jet").lower()
     if key == "parula":
         return _parula()

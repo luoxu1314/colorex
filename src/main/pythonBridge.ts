@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import log from 'electron-log/main.js'
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -52,13 +53,25 @@ function pythonRoot(): string {
 }
 
 const PER_REQUEST_TIMEOUT_MS = 180_000
-const DAEMON_START_TIMEOUT_MS = 15_000
+// PyInstaller onedir 冷启动（尤其 Windows 首次运行被 Defender 扫描时）加上
+// numpy / cv2 / matplotlib / PIL 的 import，常见会在 20–60 秒量级，所以打包态下
+// 放宽到 90 秒，开发态走本地 venv 一般很快，给 20 秒已经很宽松。
+const DAEMON_START_TIMEOUT_MS = app.isPackaged ? 90_000 : 20_000
 
 let child: ChildProcessWithoutNullStreams | null = null
 let childReady: Promise<void> | null = null
+let childReadyReject: ((reason: Error) => void) | null = null
 let stdoutBuffer = ''
 let stderrBuffer = ''
 const pending = new Map<string, Pending>()
+
+function failChildReady(message: string): void {
+  if (childReadyReject) {
+    const reject = childReadyReject
+    childReadyReject = null
+    reject(new Error(message))
+  }
+}
 
 function rejectAll(error: string): void {
   for (const [id, entry] of pending.entries()) {
@@ -69,7 +82,10 @@ function rejectAll(error: string): void {
 }
 
 function stopChild(reason?: string): void {
-  if (reason) rejectAll(reason)
+  if (reason) {
+    failChildReady(reason)
+    rejectAll(reason)
+  }
   if (child && !child.killed) {
     try {
       child.kill('SIGKILL')
@@ -79,6 +95,7 @@ function stopChild(reason?: string): void {
   }
   child = null
   childReady = null
+  childReadyReject = null
   stdoutBuffer = ''
   stderrBuffer = ''
 }
@@ -101,7 +118,7 @@ function handleStdout(chunk: string): void {
         // Messages without id (e.g. ready banner) are handled by the start
         // waiter via a one-shot listener below.
       } catch {
-        // tolerate stray non-JSON lines
+        log.warn('[pythonBridge] non-JSON stdout line:', line)
       }
     }
     idx = stdoutBuffer.indexOf('\n')
@@ -120,15 +137,33 @@ async function ensureChild(): Promise<ChildProcessWithoutNullStreams> {
   const args = backend ? ['--daemon'] : [script, '--daemon']
   const cwd = backend ? dirname(backend) : pythonRoot()
 
+  log.info('[pythonBridge] spawning backend', {
+    command,
+    args,
+    cwd,
+    packaged: app.isPackaged,
+    startTimeoutMs: DAEMON_START_TIMEOUT_MS
+  })
+
   let spawned: ChildProcessWithoutNullStreams
   try {
     spawned = spawn(command, args, {
       cwd,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        // 防止 Python 的 stdout 被块缓冲导致 ready banner 延迟送达；
+        // 强制 UTF-8 避免中文 Windows 默认 cp936 造成的乱码。
+        PYTHONUNBUFFERED: '1',
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1'
+      }
     })
   } catch (error) {
-    throw new Error(`无法启动 Python 后台：${(error as Error).message}`)
+    const message = `无法启动 Python 后台：${(error as Error).message}`
+    log.error('[pythonBridge] spawn threw', error)
+    throw new Error(message)
   }
 
   child = spawned
@@ -138,32 +173,58 @@ async function ensureChild(): Promise<ChildProcessWithoutNullStreams> {
   spawned.stdout.on('data', handleStdout)
   spawned.stderr.on('data', (data: string) => {
     stderrBuffer += data
-    if (stderrBuffer.length > 8192) {
-      stderrBuffer = stderrBuffer.slice(-8192)
+    if (stderrBuffer.length > 16384) {
+      stderrBuffer = stderrBuffer.slice(-16384)
+    }
+    // stderr 里通常是 Python traceback / DLL 加载失败之类的信息，逐行落盘。
+    for (const line of data.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (trimmed) log.warn('[python.stderr]', trimmed)
     }
   })
 
   spawned.on('error', (error) => {
+    log.error('[pythonBridge] child error event', error)
     stopChild(`Python 后台错误：${error.message}`)
   })
 
   spawned.on('exit', (code, signal) => {
     const trailer = stderrBuffer ? `\n${stderrBuffer}` : ''
-    stopChild(
-      `Python 后台意外退出（code=${code ?? 'null'}, signal=${signal ?? 'null'}）${trailer}`
-    )
+    const reason = `Python 后台意外退出（code=${code ?? 'null'}, signal=${signal ?? 'null'}）${trailer}`
+    log.error('[pythonBridge] child exited', { code, signal, stderr: stderrBuffer })
+    stopChild(reason)
   })
 
   childReady = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      const message = `Python 后台启动超时。${stderrBuffer || ''}`.trim()
+      const tail = stderrBuffer ? `\nstderr 末尾:\n${stderrBuffer.trim()}` : ''
+      const logPath = (() => {
+        try {
+          return log.transports.file.getFile().path
+        } catch {
+          return ''
+        }
+      })()
+      const hint = logPath ? `\n详细日志见：${logPath}` : ''
+      const message = `Python 后台启动超时（${Math.round(
+        DAEMON_START_TIMEOUT_MS / 1000
+      )} 秒内未就绪）。${tail}${hint}`.trim()
       stopChild(message)
-      reject(new Error(message))
     }, DAEMON_START_TIMEOUT_MS)
 
+    let settled = false
+    const finish = (err?: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeout)
+      childReadyReject = null
+      if (err) reject(err)
+      else resolve()
+    }
+    // 外部（stopChild / error / exit 事件）通过 failChildReady 触发
+    childReadyReject = (err) => finish(err)
+
     const onData = (chunk: string) => {
-      // Split by line and look for the ready banner. Keep anything else in the
-      // buffer for later handleStdout calls.
       stdoutBuffer += chunk
       let idx = stdoutBuffer.indexOf('\n')
       while (idx !== -1) {
@@ -173,14 +234,14 @@ async function ensureChild(): Promise<ChildProcessWithoutNullStreams> {
           try {
             const msg = JSON.parse(line) as PythonResult
             if (msg.ready) {
-              clearTimeout(timeout)
               spawned.stdout.off('data', onData)
               spawned.stdout.on('data', handleStdout)
-              resolve()
+              log.info('[pythonBridge] backend ready')
+              finish()
               return
             }
           } catch {
-            // ignore
+            log.warn('[pythonBridge] non-JSON startup line:', line)
           }
         }
         idx = stdoutBuffer.indexOf('\n')
@@ -191,7 +252,11 @@ async function ensureChild(): Promise<ChildProcessWithoutNullStreams> {
     spawned.stdout.on('data', onData)
   })
 
-  await childReady
+  try {
+    await childReady
+  } catch (error) {
+    throw error instanceof Error ? error : new Error(String(error))
+  }
   return spawned
 }
 
