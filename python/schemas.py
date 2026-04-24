@@ -42,7 +42,7 @@ class RenderSettings:
     colorbar_font_size: int = 16
     colorbar_auto_font: bool = True
     colorbar_width: float = 0.025
-    label_font_size: int = 22
+    label_font_size: int = 36
     label_auto_font: bool = True
     label_color: str = "#ffffff"
     label_font_family: str = "Times New Roman"
@@ -95,7 +95,7 @@ def parse_settings(raw: dict[str, Any]) -> RenderSettings:
         colorbar_font_size=int(_camel(raw, "colorbarFontSize", 16)),
         colorbar_auto_font=bool(_camel(raw, "colorbarAutoFont", True)),
         colorbar_width=float(_camel(raw, "colorbarWidth", 0.025)),
-        label_font_size=int(_camel(raw, "labelFontSize", 22)),
+        label_font_size=int(_camel(raw, "labelFontSize", 36)),
         label_auto_font=bool(_camel(raw, "labelAutoFont", True)),
         label_color=str(_camel(raw, "labelColor", "#ffffff")),
         label_font_family=str(_camel(raw, "labelFontFamily", "Times New Roman")),

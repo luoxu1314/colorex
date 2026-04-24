@@ -12,6 +12,15 @@ export interface ImageItem {
   name: string
   label: string
   crop: CropMargins
+  /**
+   * Optional absolute path to a browser-renderable preview (PNG) for formats
+   * Chromium cannot decode natively, such as TIFF. When set, UI thumbnails and
+   * the crop editor display this instead of the original file. The Python
+   * pipeline still reads the original ``path`` for actual processing.
+   */
+  previewPath?: string
+  previewPending?: boolean
+  previewError?: string
 }
 
 export interface PythonImageInput {

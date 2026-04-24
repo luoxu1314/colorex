@@ -105,6 +105,50 @@ def prepare_images(images: list[ImageInput], settings: RenderSettings) -> tuple[
     return processed, square_size
 
 
+def generate_preview(input_path: str, output_path: str, max_size: int = 2048) -> dict:
+    """Decode an image (including TIFF) and save an 8-bit PNG preview.
+
+    The output preserves aspect ratio and is bounded by ``max_size`` on the
+    longer side. 16-bit / float TIFFs are min-max stretched to 8-bit so the
+    preview is actually visible (raw 16-bit data is mostly near-black).
+    """
+    with Image.open(input_path) as img:
+        img = ImageOps.exif_transpose(img)
+        mode = img.mode
+        if mode in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+            arr = np.asarray(img).astype(np.float64)
+            if arr.size:
+                lo = float(np.min(arr))
+                hi = float(np.max(arr))
+            else:
+                lo, hi = 0.0, 1.0
+            if hi <= lo + np.finfo(float).eps:
+                arr8 = np.zeros_like(arr, dtype=np.uint8)
+            else:
+                arr8 = np.clip((arr - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+            img = Image.fromarray(arr8, mode="L")
+        elif mode not in ("RGB", "RGBA", "L", "LA"):
+            img = img.convert("RGB")
+
+        w, h = img.size
+        longest = max(w, h)
+        if longest > max_size and longest > 0:
+            scale = max_size / longest
+            new_size = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+            img = img.resize(new_size, Image.LANCZOS)
+
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        img.save(out, format="PNG", optimize=False)
+        return {
+            "success": True,
+            "previewPath": str(out),
+            "width": int(img.size[0]),
+            "height": int(img.size[1]),
+            "message": "ok",
+        }
+
+
 def save_single_pseudocolor(input_path: str, output_path: str, settings: RenderSettings) -> dict:
     from matplotlib import colors
 

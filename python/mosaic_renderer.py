@@ -34,19 +34,19 @@ def _px_to_points(px: float, dpi: int) -> float:
 
 def _label_font_size(settings: RenderSettings, tile_px: int, labels: list[str], dpi: int) -> float:
     if not settings.label_auto_font:
-        return settings.label_font_size
+        return float(settings.label_font_size)
     max_len = max([len(label) for label in labels] or [1])
     from_width_px = (tile_px * 0.94) / max(1, max_len * 0.55)
-    from_height_px = tile_px * 0.065
-    target_px = max(14, min(from_width_px, from_height_px, 42))
-    return max(5.5, min(_px_to_points(target_px, dpi), 18))
+    from_height_px = tile_px * 0.11
+    target_px = max(28, min(from_width_px, from_height_px, 96))
+    return max(10, min(_px_to_points(target_px, dpi), 36))
 
 
 def _colorbar_font_size(settings: RenderSettings, height_px: int, dpi: int) -> float:
     if not settings.colorbar_auto_font:
-        return settings.colorbar_font_size
-    target_px = max(18, min(height_px * 0.040, 42))
-    return max(5.5, min(_px_to_points(target_px, dpi), 16))
+        return float(settings.colorbar_font_size)
+    target_px = max(24, min(height_px * 0.050, 72))
+    return max(8, min(_px_to_points(target_px, dpi), 28))
 
 
 def _ensure_output_path(path: str | None, fmt: str) -> str:

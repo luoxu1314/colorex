@@ -13,14 +13,14 @@
     "dist:win": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.1",
-    "@electron-toolkit/utils": "^3.0.0",
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
-    "electron-log": "^5.2.4",
+    "electron-log": "^5.4.3",
     "lucide-vue-next": "^1.0.0",
-    "pinia": "^2.3.1",
-    "sortablejs": "^1.15.6",
-    "vue": "^3.5.13"
+    "pinia": "^3.0.4",
+    "sortablejs": "^1.15.7",
+    "vue": "^3.5.33"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",
@@ -46,12 +46,8 @@
         "to": "python"
       },
       {
-        "from": "dist-python",
-        "to": "backend",
-        "filter": [
-          "colorexchange-backend.exe",
-          "colorexchange-backend"
-        ]
+        "from": "dist-python/colorexchange-backend",
+        "to": "backend"
       }
     ],
     "mac": {

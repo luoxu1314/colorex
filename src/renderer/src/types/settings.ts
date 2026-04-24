@@ -33,5 +33,4 @@ export interface RenderSettings {
   outputPath: string
   transparentBackground: boolean
   previewMaxPixels: number
-  singleOutputPath?: string
 }

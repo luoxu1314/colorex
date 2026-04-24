@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import { registerIpc } from './ipc'
+import { shutdownPythonBridge } from './pythonBridge'
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -67,4 +68,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  shutdownPythonBridge()
 })

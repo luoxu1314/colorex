@@ -18,7 +18,8 @@ if (Test-Path "dist-python") {
 
 & ".\.venv-win\Scripts\pyinstaller.exe" `
   --clean `
-  --onefile `
+  --noconfirm `
+  --onedir `
   --name colorexchange-backend `
   --distpath dist-python `
   --workpath build-python `
@@ -26,10 +27,18 @@ if (Test-Path "dist-python") {
   --paths python `
   --hidden-import matplotlib.backends.backend_agg `
   --hidden-import PIL._tkinter_finder `
+  --exclude-module tkinter `
+  --exclude-module test `
+  --exclude-module unittest `
+  --exclude-module pydoc `
+  --exclude-module doctest `
+  --exclude-module IPython `
+  --exclude-module notebook `
   python\process.py
 
-if (!(Test-Path "dist-python\colorexchange-backend.exe")) {
-  throw "Backend exe was not produced."
+$bundledExe = Join-Path "dist-python" "colorexchange-backend\colorexchange-backend.exe"
+if (!(Test-Path $bundledExe)) {
+  throw "Backend exe was not produced at $bundledExe."
 }
 
-Write-Host "Windows backend built: dist-python\colorexchange-backend.exe"
+Write-Host "Windows backend built (onedir): $bundledExe"

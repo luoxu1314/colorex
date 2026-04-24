@@ -26,6 +26,10 @@ function stripLabelPrefix(label: string): string {
   return label.replace(/^\s*\([A-Za-z]+\)\s*/, '')
 }
 
+export function needsGeneratedPreview(path: string): boolean {
+  return /\.(tif|tiff)$/i.test(path)
+}
+
 export const useImageStore = defineStore('images', {
   state: () => ({
     items: [] as ImageItem[],
@@ -40,21 +44,33 @@ export const useImageStore = defineStore('images', {
     }
   },
   actions: {
-    addPaths(paths: string[]) {
+    addPaths(paths: string[]): ImageItem[] {
+      const added: ImageItem[] = []
       for (const path of paths) {
         const name = fileNameFromPath(path)
         const label = `(${indexLabel(this.items.length)}) ${nameWithoutExt(name)}`
-        this.items.push({
+        const item: ImageItem = {
           id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
           path,
           name,
           label,
-          crop: { enabled: false, left: 0, top: 0, right: 0, bottom: 0 }
-        })
+          crop: { enabled: false, left: 0, top: 0, right: 0, bottom: 0 },
+          previewPending: needsGeneratedPreview(path)
+        }
+        this.items.push(item)
+        added.push(item)
       }
       if (!this.selectedId && this.items.length) {
         this.selectedId = this.items[this.items.length - 1].id
       }
+      return added
+    },
+    setPreview(id: string, previewPath: string | undefined, error?: string) {
+      const item = this.items.find((row) => row.id === id)
+      if (!item) return
+      item.previewPath = previewPath
+      item.previewPending = false
+      item.previewError = error
     },
     removeSelected() {
       if (!this.selectedId) return

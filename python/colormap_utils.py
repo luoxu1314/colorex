@@ -28,7 +28,7 @@ def get_colormap(name: str):
         return _parula()
     try:
         return colormaps.get_cmap(key)
-    except ValueError:
+    except (ValueError, KeyError, Exception):  # noqa: BLE001 - matplotlib versions vary
         return colormaps.get_cmap("jet")
 
 
