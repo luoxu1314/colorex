@@ -1,0 +1,67 @@
+{
+  "name": "color-exchange-electron",
+  "version": "1.0.0",
+  "description": "Cross-platform pseudo-color mosaic renderer for scientific images.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "vue-tsc --noEmit && electron-vite build",
+    "preview": "electron-vite preview",
+    "package": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@electron-toolkit/preload": "^3.0.1",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "electron-log": "^5.2.4",
+    "lucide-vue-next": "^1.0.0",
+    "pinia": "^2.3.1",
+    "sortablejs": "^1.15.6",
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/sortablejs": "^1.15.8",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vue-tsc": "^2.2.0"
+  },
+  "build": {
+    "appId": "com.colorexchange.desktop",
+    "productName": "ColorExchange",
+    "files": [
+      "out/**",
+      "python/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "python",
+        "to": "python"
+      },
+      {
+        "from": "dist-python",
+        "to": "backend",
+        "filter": [
+          "colorexchange-backend.exe",
+          "colorexchange-backend"
+        ]
+      }
+    ],
+    "mac": {
+      "target": "dmg"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
