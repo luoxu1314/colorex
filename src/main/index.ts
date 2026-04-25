@@ -49,7 +49,33 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow.show())
+  const revealWindow = (reason: string): void => {
+    if (mainWindow.isDestroyed() || mainWindow.isVisible()) return
+    log.info('[window] showing main window', { reason })
+    mainWindow.show()
+  }
+
+  mainWindow.once('ready-to-show', () => revealWindow('ready-to-show'))
+  mainWindow.webContents.once('did-finish-load', () => revealWindow('did-finish-load'))
+  setTimeout(() => revealWindow('startup-timeout'), 5000)
+
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      log.error('[window] renderer failed to load', {
+        errorCode,
+        errorDescription,
+        validatedURL,
+        isMainFrame
+      })
+      revealWindow('did-fail-load')
+    }
+  )
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    log.error('[window] renderer process gone', details)
+    revealWindow('render-process-gone')
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)

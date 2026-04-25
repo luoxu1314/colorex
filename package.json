@@ -44,6 +44,8 @@
     "compression": "maximum",
     "electronLanguages": [
       "en",
+      "en-US",
+      "zh-CN",
       "zh_CN"
     ],
     "files": [
