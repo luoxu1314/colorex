@@ -1,6 +1,6 @@
 import { app, ipcMain, shell } from 'electron'
 import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { mkdir, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { openImageFiles, openSingleImageFile, saveOutputFile } from './fileDialog'
@@ -18,11 +18,19 @@ function trackPythonResultPaths(result: PythonResult): PythonResult {
   return result
 }
 
+function tiffPreviewCacheDir(): string {
+  return join(app.getPath('temp'), 'colorexchange', 'previews')
+}
+
+export function clearTiffPreviewCache(): void {
+  rmSync(tiffPreviewCacheDir(), { recursive: true, force: true })
+}
+
 async function buildTiffPreview(inputPath: string): Promise<PythonResult> {
   if (!inputPath) {
     return { success: false, error: '缺少图像路径。' }
   }
-  const previewDir = join(app.getPath('temp'), 'colorexchange', 'previews')
+  const previewDir = tiffPreviewCacheDir()
   await mkdir(previewDir, { recursive: true })
 
   let mtime = 0

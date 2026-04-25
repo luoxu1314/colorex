@@ -12,11 +12,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib import cm, colors
 from matplotlib.gridspec import GridSpec
-import cv2
 import numpy as np
+from PIL import Image
 
 from colormap_utils import background_color, get_colormap
-from image_pipeline import prepare_images
+from image_pipeline import prepare_images, resize_grayscale_array
 from schemas import ImageInput, RenderSettings
 
 CJK_FONT_FALLBACKS = [
@@ -100,7 +100,11 @@ def _resize_for_preview(arrays: list[np.ndarray], tile_size: int, n_cols: int, n
     if preview_tile >= tile_size:
         return arrays, tile_size
     resized = [
-        cv2.resize(arr, (preview_tile, preview_tile), interpolation=cv2.INTER_AREA)
+        resize_grayscale_array(
+            arr,
+            (preview_tile, preview_tile),
+            resample=Image.Resampling.BOX,
+        )
         for arr in arrays
     ]
     return resized, preview_tile

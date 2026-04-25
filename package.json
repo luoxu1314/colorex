@@ -1,6 +1,6 @@
 {
   "name": "color-exchange-electron",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Cross-platform pseudo-color mosaic renderer for scientific images.",
   "main": "out/main/index.js",
   "type": "module",
@@ -13,25 +13,23 @@
     "dist:win": "npm run build && electron-builder --win nsis"
   },
   "dependencies": {
-    "@electron-toolkit/preload": "^3.0.2",
-    "@electron-toolkit/utils": "^4.0.0",
-    "@fontsource-variable/inter": "^5.2.8",
-    "@fontsource-variable/jetbrains-mono": "^5.2.8",
-    "electron-log": "^5.4.3",
-    "lucide-vue-next": "^1.0.0",
-    "pinia": "^3.0.4",
-    "sortablejs": "^1.15.7",
-    "vue": "^3.5.33"
+    "electron-log": "^5.4.3"
   },
   "devDependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@types/node": "^24.12.2",
     "@types/sortablejs": "^1.15.8",
     "@vitejs/plugin-vue": "^6.0.6",
     "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
+    "lucide-vue-next": "^1.0.0",
+    "pinia": "^3.0.4",
+    "sortablejs": "^1.15.7",
     "typescript": "^5.7.3",
     "vite": "^7.3.2",
+    "vue": "^3.5.33",
     "vue-tsc": "^3.2.7"
   },
   "overrides": {
@@ -43,15 +41,22 @@
     "appId": "com.colorexchange.desktop",
     "productName": "ColorExchange",
     "icon": "build/icon",
+    "compression": "maximum",
+    "electronLanguages": [
+      "en",
+      "zh_CN"
+    ],
     "files": [
       "out/**",
-      "python/**",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "python",
-        "to": "python"
+        "to": "python",
+        "filter": [
+          "*.py"
+        ]
       },
       {
         "from": "dist-python/colorexchange-backend",

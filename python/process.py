@@ -18,7 +18,7 @@ def fail(error: str) -> dict:
 def dispatch(action: str | None, payload: dict) -> dict:
     """Route an incoming action.
 
-    Heavy dependencies (numpy / PIL / cv2 / matplotlib) are deferred to the
+    Heavy dependencies (numpy / PIL / matplotlib) are deferred to the
     functions that actually need them so that ``run_daemon`` can emit its
     ``ready`` banner before paying the ~1–60s cold-import cost. The first
     request pays for whatever modules its action happens to need; subsequent
@@ -50,7 +50,6 @@ def dispatch(action: str | None, payload: dict) -> dict:
             _stage("numpy", lambda: __import__("numpy"))
             _stage("pillow", lambda: __import__("PIL.Image"))
         if "mosaic" in stages:
-            _stage("cv2", lambda: __import__("cv2"))
             _stage("matplotlib", lambda: __import__("matplotlib.pyplot"))
 
         return ok({"success": True, "loaded": loaded, "errors": errors, "message": "warmed"})
@@ -58,7 +57,7 @@ def dispatch(action: str | None, payload: dict) -> dict:
     settings = parse_settings(payload.get("settings") or {})
 
     if action == "generate_preview":
-        # Only pulls in numpy + PIL. Does NOT trigger cv2/matplotlib.
+        # Only pulls in numpy + PIL. Does NOT trigger matplotlib.
         from image_pipeline import generate_preview
         return ok(
             generate_preview(

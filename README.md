@@ -106,7 +106,7 @@ npm run dist:win
 |---|---|---|---|---|
 | App Designer 固定像素 UI | Vue 组件化三栏布局 | 更适合跨平台桌面和后续扩展 | 不影响 | 逐项检查控件和操作 |
 | `uihtml` 自写拖拽表格 | SortableJS 图片卡片列表 | 减少 MATLAB 通信耦合，保留拖拽/选择/标签 | 不影响 | 拖拽后顺序和标签前缀更新 |
-| MATLAB 逐步矩阵处理 | NumPy/OpenCV/Pillow pipeline | 更快、更稳定，支持更多图像格式 | 不影响 | 对比黑电平、阈值、归一化输出 |
+| MATLAB 逐步矩阵处理 | NumPy/Pillow/Matplotlib pipeline | 更快、更稳定，支持更多图像格式 | 不影响 | 对比黑电平、阈值、归一化输出 |
 | 手写色条 axes | Matplotlib `ScalarMappable + colorbar` | 科学绘图标准流程，映射关系更清晰 | 视觉接近且映射更严格 | 检查 image 和 colorbar 共用 `cmap/norm` |
 | `tiledlayout` | Matplotlib GridSpec | 精准控制右侧色条区和无缝 tile | 不影响 | 导出检查无明显边框 |
 | `exportgraphics` | `savefig` DPI/格式 | 跨平台、可打包 | 不影响 | 检查像素尺寸和文件格式 |

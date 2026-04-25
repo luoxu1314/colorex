@@ -68,7 +68,12 @@ else {
     }
 }
 $backendSize = [math]::Round((Get-Item $backendExe).Length / 1MB, 2)
-Write-Host "[build-local-win] backend exe: $backendExe ($backendSize MB)" -ForegroundColor Green
+$backendDir = Split-Path -Parent $backendExe
+$backendDirSize = [math]::Round(
+    ((Get-ChildItem -Path $backendDir -Recurse -File | Measure-Object -Property Length -Sum).Sum) / 1MB,
+    2
+)
+Write-Host "[build-local-win] backend exe: $backendExe ($backendSize MB, folder $backendDirSize MB)" -ForegroundColor Green
 
 Write-Host "[build-local-win] building renderer + main (vite) ..." -ForegroundColor Cyan
 npm run build

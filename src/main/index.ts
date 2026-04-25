@@ -2,14 +2,15 @@ import { app, BrowserWindow, net, protocol, shell } from 'electron'
 import log from 'electron-log/main.js'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { is } from '@electron-toolkit/utils'
-import { registerIpc } from './ipc'
+import { clearTiffPreviewCache, registerIpc } from './ipc'
 import { isApproved } from './pathAccess'
 import { runPython, shutdownPythonBridge } from './pythonBridge'
 
+const isDev = !app.isPackaged
+
 log.initialize()
 log.transports.file.level = 'info'
-log.transports.console.level = is.dev ? 'debug' : 'info'
+log.transports.console.level = isDev ? 'debug' : 'info'
 log.info('[app] starting', {
   version: app.getVersion(),
   packaged: app.isPackaged,
@@ -62,7 +63,7 @@ function createWindow(): void {
     if (url.startsWith('file://')) event.preventDefault()
   })
 
-  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+  if (isDev && process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
@@ -87,8 +88,8 @@ app.whenReady().then(() => {
   createWindow()
 
   // Preheat the Python daemon in the background so the first real preview /
-  // mosaic request doesn't stall on cold numpy/PIL imports (which can take
-  // 30–90 s on a freshly installed Windows box while Defender scans the
+  // mosaic request doesn't stall on cold numpy/PIL/matplotlib imports (which
+  // can take 30–90 s on a freshly installed Windows box while Defender scans the
   // PyInstaller _internal DLLs). Failures are non-fatal — when the user
   // eventually clicks "generate preview" the lazy import path still works.
   const preheatStart = Date.now()
@@ -121,4 +122,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   shutdownPythonBridge()
+  try {
+    clearTiffPreviewCache()
+    log.info('[cache] TIFF preview cache cleared')
+  } catch (error) {
+    log.warn('[cache] failed to clear TIFF preview cache', error)
+  }
 })

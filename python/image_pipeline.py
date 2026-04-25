@@ -7,10 +7,8 @@ from PIL import Image, ImageOps
 
 from schemas import CropMargins, ImageInput, RenderSettings
 
-# Note: ``cv2`` and ``matplotlib`` are intentionally NOT imported at module
-# level. They are the heaviest cold-start dependencies (opencv alone pulls in
-# dozens of MB of DLLs on Windows) and only a subset of actions need them, so
-# we defer their imports to the functions that actually use them.
+# Note: ``matplotlib`` is intentionally NOT imported at module level. It is the
+# heaviest cold-start dependency and only a subset of actions need it.
 
 
 def read_grayscale(path: str) -> np.ndarray:
@@ -67,6 +65,17 @@ def preprocess_image(arr: np.ndarray, settings: RenderSettings) -> np.ndarray:
     return im
 
 
+def resize_grayscale_array(
+    arr: np.ndarray,
+    size: tuple[int, int],
+    resample: Image.Resampling = Image.Resampling.BILINEAR,
+) -> np.ndarray:
+    """Resize a 2D numeric image without pulling in OpenCV."""
+    image = Image.fromarray(np.asarray(arr, dtype=np.float32))
+    resized = image.resize(size, resample=resample)
+    return np.asarray(resized, dtype=np.float64)
+
+
 def resize_center_crop_square(arr: np.ndarray, size: int) -> np.ndarray:
     h, w = arr.shape[:2]
     if h == size and w == size:
@@ -74,11 +83,11 @@ def resize_center_crop_square(arr: np.ndarray, size: int) -> np.ndarray:
     scale = max(size / h, size / w)
     new_w = max(size, int(round(w * scale)))
     new_h = max(size, int(round(h * scale)))
-    # Lazy import: only the mosaic pipeline hits this, preview/convert paths
-    # never do. Keeping cv2 out of module top-level lets the daemon's ready
-    # banner fire ~1s earlier.
-    import cv2
-    resized = cv2.resize(arr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    resized = resize_grayscale_array(
+        arr,
+        (new_w, new_h),
+        resample=Image.Resampling.BILINEAR,
+    )
     y1 = max(0, (new_h - size) // 2)
     x1 = max(0, (new_w - size) // 2)
     return resized[y1 : y1 + size, x1 : x1 + size]

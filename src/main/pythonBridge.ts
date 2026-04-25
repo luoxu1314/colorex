@@ -54,7 +54,7 @@ function pythonRoot(): string {
 
 const PER_REQUEST_TIMEOUT_MS = 180_000
 // PyInstaller onedir 冷启动（尤其 Windows 首次运行被 Defender 扫描时）加上
-// numpy / cv2 / matplotlib / PIL 的 import，常见会在 20–60 秒量级，所以打包态下
+// numpy / matplotlib / PIL 的 import，常见会在 20–60 秒量级，所以打包态下
 // 放宽到 90 秒，开发态走本地 venv 一般很快，给 20 秒已经很宽松。
 const DAEMON_START_TIMEOUT_MS = app.isPackaged ? 90_000 : 20_000
 
