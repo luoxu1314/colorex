@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { openImageFiles, openSingleImageFile, saveOutputFile } from './fileDialog'
 import { approvePath, approvePaths } from './pathAccess'
 import { runPython, type PythonResult } from './pythonBridge'
+import { checkForUpdates, openReleasePage } from './updateChecker'
 
 /** Approve any outputPath / previewPath a Python response carries back, then
  * return it untouched. Centralized here so every IPC handler that forwards
@@ -79,6 +80,8 @@ export function registerIpc(): void {
   ipcMain.handle('preview:buildTiff', (_event, inputPath: string) =>
     buildTiffPreview(inputPath)
   )
+  ipcMain.handle('update:check', () => checkForUpdates())
+  ipcMain.handle('update:openReleasePage', (_event, url?: string) => openReleasePage(url))
   // Invoked from preload after ``webUtils.getPathForFile`` resolves a dropped
   // file to a real local path. The renderer cannot fabricate real File paths
   // (synthesized File objects resolve to ''), so this channel is an implicit

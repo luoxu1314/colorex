@@ -14,6 +14,17 @@ export interface RevealResult {
   reason?: string
 }
 
+export interface UpdateCheckResult {
+  success: boolean
+  currentVersion: string
+  latestVersion?: string
+  updateAvailable?: boolean
+  releaseName?: string
+  releaseUrl?: string
+  publishedAt?: string
+  error?: string
+}
+
 const api = {
   openImages: (): Promise<string[]> => ipcRenderer.invoke('dialog:openImages'),
   openSingleImage: (): Promise<string | null> => ipcRenderer.invoke('dialog:openSingleImage'),
@@ -25,6 +36,9 @@ const api = {
     ipcRenderer.invoke('preview:buildTiff', inputPath),
   revealInFolder: (targetPath: string): Promise<RevealResult> =>
     ipcRenderer.invoke('shell:revealInFolder', targetPath),
+  checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check'),
+  openReleasePage: (url?: string): Promise<boolean> =>
+    ipcRenderer.invoke('update:openReleasePage', url),
   getDroppedFilePath: async (file: File): Promise<string> => {
     let path = ''
     try {

@@ -28,6 +28,7 @@ import {
   ImagePlus,
   Keyboard,
   Moon,
+  RefreshCw,
   RotateCcw,
   Sparkles,
   Sun,
@@ -46,6 +47,7 @@ const editorOpen = ref(false)
 const renameSignal = ref(0)
 const dragActive = ref(false)
 const dragHover = ref(false)
+const updateChecking = ref(false)
 let dragDepth = 0
 let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -345,6 +347,39 @@ function revealOutputDir() {
   return revealInFolder(lastOutputPath.value || settings.outputPath)
 }
 
+function versionLabel(version: string): string {
+  return version.startsWith('v') ? version : `v${version}`
+}
+
+async function checkUpdates() {
+  if (updateChecking.value) return
+  updateChecking.value = true
+  appendLog('正在检查 GitHub Release 更新...')
+  try {
+    const result = await window.colorExchange.checkForUpdates()
+    if (!result.success) {
+      appendLog(result.error || '检查更新失败。', 'warn')
+      return
+    }
+    const current = versionLabel(result.currentVersion)
+    const latest = versionLabel(result.latestVersion || result.currentVersion)
+    if (result.updateAvailable) {
+      appendLog(`发现新版本 ${latest}（当前 ${current}），正在打开 GitHub Release...`, 'success')
+      ui.pushToast(`最新版本 ${latest} 已发布`, 'success', {
+        title: '发现新版本',
+        duration: 6000,
+      })
+      await window.colorExchange.openReleasePage(result.releaseUrl)
+      return
+    }
+    appendLog(`当前已是最新版本：${current}`, 'success')
+  } catch (error) {
+    appendLog(`检查更新失败：${error instanceof Error ? error.message : String(error)}`, 'error')
+  } finally {
+    updateChecking.value = false
+  }
+}
+
 function onKeyDown(event: KeyboardEvent) {
   const target = event.target as HTMLElement | null
   const inEditable =
@@ -504,6 +539,16 @@ const commands = computed<CommandItem[]>(() => {
       run: revealOutputDir,
     },
     {
+      id: 'check-updates',
+      title: '检查更新',
+      hint: '检查 GitHub Release 是否有新版本',
+      group: '其他',
+      icon: RefreshCw,
+      disabled: updateChecking.value,
+      keywords: 'update release github version',
+      run: checkUpdates,
+    },
+    {
       id: 'toggle-theme',
       title: ui.theme === 'dark' ? '切换到明亮模式' : '切换到黑暗模式',
       hint: '切换界面的明暗主题',
@@ -598,6 +643,15 @@ onBeforeUnmount(() => {
         >
           <Command :size="15" />
           <span>命令</span>
+        </button>
+        <button
+          class="icon-button ghost"
+          :disabled="updateChecking"
+          title="检查 GitHub Release 更新"
+          aria-label="检查更新"
+          @click="checkUpdates"
+        >
+          <RefreshCw :size="16" :class="{ spinning: updateChecking }" />
         </button>
         <button
           class="icon-button ghost"
