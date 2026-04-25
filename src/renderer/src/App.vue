@@ -6,14 +6,37 @@ import PreviewPanel from './components/PreviewPanel.vue'
 import ImageEditorDialog from './components/ImageEditorDialog.vue'
 import ExportPanel from './components/ExportPanel.vue'
 import StatusLog from './components/StatusLog.vue'
+import ThemeToggle from './components/ThemeToggle.vue'
+import CommandPalette from './components/CommandPalette.vue'
+import type { CommandItem } from './types/command'
+import ToastContainer from './components/ToastContainer.vue'
+import ShortcutsHelp from './components/ShortcutsHelp.vue'
 import { needsGeneratedPreview, useImageStore } from './stores/imageStore'
 import { useSettingsStore } from './stores/settingsStore'
+import { useUiStore } from './stores/uiStore'
 import type { ImageItem, RenderResult } from './types/image'
 import type { LogEntry, LogLevel } from './types/log'
-import { Download, Eye, FilePlus2, ImagePlus, Palette, Sparkles, Wand2 } from 'lucide-vue-next'
+import {
+  Command,
+  Download,
+  Eye,
+  FilePlus2,
+  FolderOpen,
+  HelpCircle,
+  ImagePlus,
+  Keyboard,
+  Moon,
+  Palette,
+  RotateCcw,
+  Sparkles,
+  Sun,
+  Trash2,
+  Wand2,
+} from 'lucide-vue-next'
 
 const imageStore = useImageStore()
 const settings = useSettingsStore()
+const ui = useUiStore()
 const previewPath = ref('')
 const lastOutputPath = ref('')
 const outputSize = ref('')
@@ -40,6 +63,11 @@ function now(): string {
 
 function appendLog(message: string, level: LogLevel = 'info') {
   logs.value = [{ id: logCounter++, time: now(), message, level }, ...logs.value].slice(0, 120)
+  // Also surface success/warn/error as a toast so the user notices the event
+  // even if the status log is out of view. Plain info stays silent.
+  if (level === 'success') ui.pushToast(message, 'success')
+  else if (level === 'warn') ui.pushToast(message, 'warn')
+  else if (level === 'error') ui.pushToast(message, 'error', { title: '出错了' })
 }
 
 function clearLogs() {
@@ -320,17 +348,34 @@ function onKeyDown(event: KeyboardEvent) {
     target?.isContentEditable ||
     ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName || '')
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'o') {
+  const cmd = event.metaKey || event.ctrlKey
+
+  if (cmd && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    ui.toggleCommandPalette()
+    return
+  }
+  if (cmd && event.key === '/') {
+    event.preventDefault()
+    ui.toggleTheme()
+    return
+  }
+  if (!inEditable && event.key === '?') {
+    event.preventDefault()
+    ui.openShortcuts()
+    return
+  }
+  if (cmd && event.key.toLowerCase() === 'o') {
     event.preventDefault()
     addImages()
     return
   }
-  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+  if (cmd && event.key === 'Enter') {
     event.preventDefault()
     render(false)
     return
   }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+  if (cmd && event.key.toLowerCase() === 's') {
     event.preventDefault()
     render(true)
     return
@@ -347,6 +392,143 @@ function onKeyDown(event: KeyboardEvent) {
     }
   }
 }
+
+// Modifier key rendered as a symbol on macOS. Renderer process has
+// `navigator.platform` available; no need for the main process.
+const isMac =
+  typeof navigator !== 'undefined' &&
+  /(Mac|iPhone|iPad|iPod)/i.test(navigator.platform ?? '')
+const modLabel = isMac ? '⌘' : 'Ctrl'
+
+function clearAllImages() {
+  if (!imageStore.items.length) return
+  imageStore.clear()
+  appendLog('已清空图像列表。', 'info')
+}
+
+const commands = computed<CommandItem[]>(() => {
+  const hasImages = imageStore.items.length > 0
+  const hasSelection = Boolean(imageStore.selectedId)
+  return [
+    {
+      id: 'add-images',
+      title: '添加图像',
+      hint: '从文件选择器添加一张或多张图片',
+      group: '文件',
+      icon: FilePlus2,
+      shortcut: `${modLabel}O`,
+      keywords: 'open import add files image',
+      run: addImages,
+    },
+    {
+      id: 'convert-single',
+      title: '单图伪彩色转换',
+      hint: '对单张图片直接输出伪彩色结果',
+      group: '文件',
+      icon: Wand2,
+      keywords: 'single convert pseudo color',
+      run: convertSingle,
+    },
+    {
+      id: 'render-preview',
+      title: '生成预览',
+      hint: '渲染当前参数下的拼图预览',
+      group: '处理',
+      icon: Eye,
+      shortcut: `${modLabel}↵`,
+      disabled: !hasImages || busy.value,
+      keywords: 'preview render mosaic',
+      run: () => render(false),
+    },
+    {
+      id: 'export-output',
+      title: '导出图片',
+      hint: '按完整分辨率导出成品文件',
+      group: '处理',
+      icon: Download,
+      shortcut: `${modLabel}S`,
+      disabled: !hasImages || busy.value,
+      keywords: 'export save output',
+      run: () => render(true),
+    },
+    {
+      id: 'normalized-preset',
+      title: '应用归一化预设',
+      hint: '快速应用 0-1 归一化显示',
+      group: '处理',
+      icon: Sparkles,
+      disabled: !hasImages,
+      keywords: 'normalize preset',
+      run: () => settings.applyNormalizedPreset(),
+    },
+    {
+      id: 'edit-selected',
+      title: '编辑选中图像',
+      hint: '在图像编辑器中裁剪或调整',
+      group: '编辑',
+      icon: ImagePlus,
+      disabled: !hasSelection,
+      keywords: 'edit crop dialog',
+      run: () => {
+        editorOpen.value = true
+      },
+    },
+    {
+      id: 'remove-selected',
+      title: '移除选中图像',
+      group: '编辑',
+      icon: Trash2,
+      shortcut: 'Del',
+      disabled: !hasSelection,
+      keywords: 'remove delete selected',
+      run: () => imageStore.removeSelected(),
+    },
+    {
+      id: 'clear-images',
+      title: '清空图像列表',
+      group: '编辑',
+      icon: RotateCcw,
+      disabled: !hasImages,
+      keywords: 'clear reset images',
+      run: clearAllImages,
+    },
+    {
+      id: 'reveal-output',
+      title: '打开输出目录',
+      group: '其他',
+      icon: FolderOpen,
+      keywords: 'reveal folder open output',
+      run: revealOutputDir,
+    },
+    {
+      id: 'toggle-theme',
+      title: ui.theme === 'dark' ? '切换到明亮模式' : '切换到黑暗模式',
+      hint: '切换界面的明暗主题',
+      group: '其他',
+      icon: ui.theme === 'dark' ? Sun : Moon,
+      shortcut: `${modLabel}/`,
+      keywords: 'theme mode dark light toggle',
+      run: () => ui.toggleTheme(),
+    },
+    {
+      id: 'show-shortcuts',
+      title: '显示键盘快捷键',
+      group: '其他',
+      icon: Keyboard,
+      shortcut: '?',
+      keywords: 'shortcuts keys help',
+      run: () => ui.openShortcuts(),
+    },
+    {
+      id: 'clear-logs',
+      title: '清空日志',
+      group: '其他',
+      icon: Trash2,
+      keywords: 'clear logs history',
+      run: clearLogs,
+    },
+  ]
+})
 
 onMounted(() => {
   window.addEventListener('keydown', onKeyDown)
@@ -401,6 +583,23 @@ onBeforeUnmount(() => {
           <Sparkles :size="16" />
           <span>归一化预设</span>
         </button>
+        <button
+          class="header-btn ghost"
+          title="命令面板 (Ctrl/⌘ + K)"
+          @click="ui.openCommandPalette()"
+        >
+          <Command :size="15" />
+          <span>命令</span>
+        </button>
+        <button
+          class="icon-button ghost"
+          title="键盘快捷键 (按 ?)"
+          aria-label="键盘快捷键"
+          @click="ui.openShortcuts()"
+        >
+          <HelpCircle :size="16" />
+        </button>
+        <ThemeToggle />
       </div>
     </header>
 
@@ -423,6 +622,7 @@ onBeforeUnmount(() => {
           :output-size="outputSize"
           @refresh="render(false)"
           @reveal="revealPreview"
+          @open-command="ui.openCommandPalette()"
         />
         <div class="bottom-actions">
           <button
@@ -476,5 +676,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Transition>
+
+    <CommandPalette :commands="commands" />
+    <ShortcutsHelp />
+    <ToastContainer />
   </div>
 </template>

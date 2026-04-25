@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { FolderOpen, Maximize2, RefreshCw, Scan } from 'lucide-vue-next'
+import { FolderOpen, Maximize2, RefreshCw, Scan, Sparkles } from 'lucide-vue-next'
 
 const props = defineProps<{
   previewPath: string
@@ -8,7 +8,7 @@ const props = defineProps<{
   outputSize: string
 }>()
 
-defineEmits<{ refresh: []; reveal: [] }>()
+defineEmits<{ refresh: []; reveal: []; openCommand: [] }>()
 
 const scale = ref(1)
 const tx = ref(0)
@@ -119,9 +119,20 @@ function fit() {
         alt="preview"
         draggable="false"
       />
-      <div v-else class="empty-state">
-        <div class="empty-title">预览区</div>
-        <div class="empty-caption">添加图像后点击"预览"生成拼图</div>
+      <div v-else class="hero-empty">
+        <div class="hero-empty-icon" aria-hidden="true">
+          <Sparkles />
+        </div>
+        <div class="hero-empty-caption">
+          把图像拖进窗口，或通过左上角「添加图像」开始。
+          随后调整右侧参数，点击下方「生成预览」即可实时查看拼图效果。
+        </div>
+        <div class="hero-empty-cta">
+          <button class="ghost" @click="$emit('openCommand')">
+            浏览命令面板
+            <span class="cmdk-kbd">⌘K</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
