@@ -1,6 +1,6 @@
 {
   "name": "color-exchange-electron",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "Cross-platform pseudo-color mosaic renderer for scientific images.",
   "main": "out/main/index.js",
   "type": "module",
@@ -42,6 +42,7 @@
   "build": {
     "appId": "com.colorexchange.desktop",
     "productName": "ColorExchange",
+    "icon": "build/icon",
     "files": [
       "out/**",
       "python/**",

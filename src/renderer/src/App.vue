@@ -8,12 +8,14 @@ import ExportPanel from './components/ExportPanel.vue'
 import StatusLog from './components/StatusLog.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import appIcon from './assets/app-icon.png'
 import type { CommandItem } from './types/command'
 import ToastContainer from './components/ToastContainer.vue'
 import ShortcutsHelp from './components/ShortcutsHelp.vue'
 import { needsGeneratedPreview, useImageStore } from './stores/imageStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useUiStore } from './stores/uiStore'
+import { APP_COPYRIGHT } from './config/appInfo'
 import type { ImageItem, RenderResult } from './types/image'
 import type { LogEntry, LogLevel } from './types/log'
 import {
@@ -26,7 +28,6 @@ import {
   ImagePlus,
   Keyboard,
   Moon,
-  Palette,
   RotateCcw,
   Sparkles,
   Sun,
@@ -49,6 +50,8 @@ let dragDepth = 0
 let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
 
 const SUPPORTED_EXT_RE = /\.(png|jpe?g|tiff?|bmp|webp)$/i
+
+const appVersion = __APP_VERSION__
 
 let logCounter = 0
 const logs = ref<LogEntry[]>([
@@ -551,10 +554,15 @@ onBeforeUnmount(() => {
   <div class="app-root">
     <header class="app-header">
       <div class="brand">
-        <span class="brand-icon"><Palette :size="18" /></span>
+        <span class="brand-icon">
+          <img :src="appIcon" alt="" aria-hidden="true" />
+        </span>
         <div>
           <div class="brand-title">ColorExchange</div>
           <div class="brand-caption">Pseudo-color mosaic for scientific images</div>
+          <div class="brand-meta" role="contentinfo" aria-label="版本与版权">
+            v{{ appVersion }} · {{ APP_COPYRIGHT }}
+          </div>
         </div>
         <span
           class="status-chip"
