@@ -19,6 +19,36 @@ from colormap_utils import background_color, get_colormap
 from image_pipeline import prepare_images
 from schemas import ImageInput, RenderSettings
 
+CJK_FONT_FALLBACKS = [
+    "Microsoft YaHei",
+    "SimHei",
+    "SimSun",
+    "PingFang SC",
+    "Heiti SC",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "WenQuanYi Zen Hei",
+    "Arial Unicode MS",
+]
+
+
+def _contains_cjk(text: str) -> bool:
+    return any(
+        "\u3400" <= ch <= "\u4dbf"
+        or "\u4e00" <= ch <= "\u9fff"
+        or "\uf900" <= ch <= "\ufaff"
+        for ch in text
+    )
+
+
+def _font_family_for_text(preferred: str, text: str) -> list[str] | str:
+    if not _contains_cjk(text):
+        return preferred
+    fallback = [font for font in CJK_FONT_FALLBACKS if font != preferred]
+    if preferred in CJK_FONT_FALLBACKS:
+        return [preferred, *fallback]
+    return [*fallback, preferred]
+
 
 def _ticks(settings: RenderSettings) -> np.ndarray:
     if settings.normalize_mode != "absolute":
@@ -152,6 +182,7 @@ def render_mosaic(
     for idx, arr in enumerate(arrays):
         row = idx // n_cols
         col = idx % n_cols
+        label = labels[idx]
         ax = fig.add_subplot(gs[row, col])
         ax.imshow(arr, cmap=cmap, norm=norm, interpolation="nearest")
         ax.set_axis_off()
@@ -160,12 +191,12 @@ def render_mosaic(
         ax.text(
             0.02,
             0.96,
-            labels[idx],
+            label,
             transform=ax.transAxes,
             color=settings.label_color,
             fontsize=label_size,
             fontweight="bold" if settings.label_bold else "normal",
-            fontfamily=settings.label_font_family,
+            fontfamily=_font_family_for_text(settings.label_font_family, label),
             ha="left",
             va="top",
             clip_on=True,
@@ -243,7 +274,7 @@ def render_mosaic(
                 settings.colorbar_label,
                 color="white",
                 fontsize=cbar_font_size,
-                fontfamily=settings.label_font_family,
+                fontfamily=_font_family_for_text(settings.label_font_family, settings.colorbar_label),
                 labelpad=4,
             )
 

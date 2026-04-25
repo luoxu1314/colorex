@@ -25,7 +25,17 @@ const cmaps = [
   'inferno',
   'magma'
 ]
-const fonts = ['Times New Roman', 'Arial', 'Helvetica', 'Calibri', 'SimHei', 'SimSun']
+const fonts = [
+  'Times New Roman',
+  'Arial',
+  'Helvetica',
+  'Calibri',
+  'Microsoft YaHei',
+  'PingFang SC',
+  'Noto Sans CJK SC',
+  'SimHei',
+  'SimSun'
+]
 
 const normalizeOptions: { value: NormalizeMode; label: string; hint: string }[] = [
   { value: 'absolute', label: '绝对亮度', hint: '保留原始像素值（常用于荧光、强度图）' },

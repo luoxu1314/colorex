@@ -2820,6 +2820,20 @@ html[data-theme="light"] .tool-button:hover:not(:disabled) {
   background: rgba(15, 23, 42, 0.06);
 }
 
+html[data-theme="light"] .tool-button.active {
+  background: rgba(var(--accent-rgb), 0.12);
+  border-color: rgba(var(--accent-rgb), 0.30);
+  color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.70),
+    0 2px 8px rgba(var(--accent-rgb), 0.12);
+}
+
+html[data-theme="light"] .tool-button.active:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.18);
+  color: #1d4ed8;
+}
+
 html[data-theme="light"] .status-chip {
   background: rgba(15, 23, 42, 0.04);
 }

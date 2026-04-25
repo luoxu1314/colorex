@@ -18,6 +18,7 @@ const last = ref({ x: 0, y: 0 })
 const aspectLock = ref(true)
 const naturalW = ref(0)
 const naturalH = ref(0)
+let defaultCropInitialized = false
 
 // Minimum crop side in image pixels — large enough to hit, small enough to
 // not feel constrained on tiny thumbnails.
@@ -60,6 +61,7 @@ function onImageLoad(event: Event) {
   const img = event.target as HTMLImageElement
   naturalW.value = img.naturalWidth || 1
   naturalH.value = img.naturalHeight || 1
+  ensureDefaultCrop()
 }
 
 function wheel(event: WheelEvent) {
@@ -96,7 +98,7 @@ function cropRectFromProps(): PxRect {
 function initialSquareRect(): PxRect {
   const W = Math.max(1, naturalW.value || 1)
   const H = Math.max(1, naturalH.value || 1)
-  const side = 0.8 * Math.min(W, H)
+  const side = Math.min(W, H)
   const x0 = (W - side) / 2
   const y0 = (H - side) / 2
   return { x0, y0, x1: x0 + side, y1: y0 + side }
@@ -121,6 +123,15 @@ function enableCrop(): void {
   } else {
     emit('update-crop', { enabled: true })
   }
+}
+
+function ensureDefaultCrop(): void {
+  if (defaultCropInitialized) return
+  if (props.image.crop.enabled) return
+  if (!naturalW.value || !naturalH.value) return
+  defaultCropInitialized = true
+  aspectLock.value = true
+  emitRect(initialSquareRect())
 }
 
 function currentCropIsSquare(): boolean {

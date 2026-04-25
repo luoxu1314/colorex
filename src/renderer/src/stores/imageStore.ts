@@ -3,7 +3,15 @@ import type { ImageItem, PythonImageInput } from '../types/image'
 
 function fileNameFromPath(path: string): string {
   const normalized = path.replace(/\\/g, '/')
-  return normalized.split('/').pop() || path
+  return normalizeDisplayText(normalized.split('/').pop() || path)
+}
+
+function normalizeDisplayText(value: string): string {
+  try {
+    return value.normalize('NFC')
+  } catch {
+    return value
+  }
 }
 
 function nameWithoutExt(name: string): string {
